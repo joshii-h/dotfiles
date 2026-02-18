@@ -61,7 +61,7 @@ sysup() {
   setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
   local emlog=$(mktemp) fplog=$(mktemp)
   local start=$SECONDS
-  command sudo emerge --sync &>"$emlog" && command sudo emerge -uDN @world &>>"$emlog" &
+  command sudo emerge --sync &>"$emlog" && command sudo emerge -uDN --with-bdeps=n @world &>>"$emlog" &
   local empid=$!
   setsid flatpak upgrade -y &>"$fplog" &
   local fppid=$!
