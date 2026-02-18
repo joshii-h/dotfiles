@@ -8,8 +8,12 @@ chezmoi-managed dotfiles for **Fedora** (primary) and **Gentoo**.
 |---|---|---|
 | `~/.zshrc` | Yes | `sysup()` only on Fedora |
 | `~/.zshenv` | No | Cargo env — portable |
+| `~/.gitconfig` | Yes | delta pager, `[safe]` dirs excluded (machine-specific) |
+| `~/.config/git/ignore` | No | Global gitignore |
+| `~/.config/gh/config.yml` | No | GitHub CLI config |
 | `~/.config/kitty/kitty.conf` | No | Portable |
 | `~/.config/starship.toml` | No | Portable |
+| `~/.config/btop/btop.conf` | No | Portable |
 
 Additionally, a `run_once_after` script generates **deno completions** via `deno completions zsh` if deno is installed.
 
