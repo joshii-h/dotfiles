@@ -1,6 +1,11 @@
 [user]
+{{- if eq .distro "gentoo" }}
+	email = joshuahirsig@gmail.com
+	name = joshii-h
+{{- else }}
 	email = joshua.hirsig@immeditech.ch
 	name = Joshua Hirsig
+{{- end }}
 [http]
 	sslVerify = false
 [core]

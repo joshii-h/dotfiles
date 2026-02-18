@@ -54,6 +54,62 @@ sysup() {
   printf "\n\033[1;32m✓ Done in %ds\033[0m\n" "$((SECONDS - start))"
 }
 {{- end }}
+{{- if eq .distro "gentoo" }}
+
+sysup() {
+  command sudo -v || return 1
+  setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
+  local emlog=$(mktemp) fplog=$(mktemp)
+  local start=$SECONDS
+  command sudo emerge --sync &>"$emlog" && command sudo emerge -uDN @world &>>"$emlog" &
+  local empid=$!
+  setsid flatpak upgrade -y &>"$fplog" &
+  local fppid=$!
+  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 drawn=0
+  tput civis 2>/dev/null
+  trap 'tput cnorm 2>/dev/null' INT TERM
+  while true; do
+    local em_up=0 fp_up=0
+    kill -0 $empid 2>/dev/null && em_up=1
+    kill -0 $fppid 2>/dev/null && fp_up=1
+    (( !em_up && !fp_up )) && break
+    (( drawn )) && printf "\033[5A"
+    local elapsed=$((SECONDS - start))
+    local maxw=$(( COLUMNS - 16 ))
+    local s=${spin:$((i%${#spin})):1}
+    printf "\033[K\n"
+    printf "\033[K  \033[1;33m%s\033[0m  \033[1msysup\033[0m  \033[2m%dm%02ds\033[0m\n" \
+      "$s" $((elapsed/60)) $((elapsed%60))
+    # emerge
+    local em_last=$(tail -1 "$emlog" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r')
+    if (( em_up )); then
+      printf "\033[K  \033[33m●\033[0m  emerge   \033[2m%s\033[0m\n" "${${em_last:-(starting...)}:0:$maxw}"
+    else
+      printf "\033[K  \033[32m✓\033[0m  emerge   \033[2mdone\033[0m\n"
+    fi
+    # flatpak
+    local fp_last=$(tail -1 "$fplog" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r')
+    if (( fp_up )); then
+      printf "\033[K  \033[33m●\033[0m  flatpak  \033[2m%s\033[0m\n" "${${fp_last:-(starting...)}:0:$maxw}"
+    else
+      printf "\033[K  \033[32m✓\033[0m  flatpak  \033[2mdone\033[0m\n"
+    fi
+    printf "\033[K"
+    drawn=1; ((i++)); sleep 0.5
+  done
+  tput cnorm 2>/dev/null
+  trap - INT TERM
+  (( drawn )) && printf "\033[5A"
+  for _ in {1..5}; do printf "\033[K\n"; done
+  printf "\033[5A"
+  wait
+  for label log in emerge "$emlog" flatpak "$fplog"; do
+    printf "\n\033[1;36m--- %s ---\033[0m\n" "$label"; cat "$log"
+  done
+  rm -f "$emlog" "$fplog"
+  printf "\n\033[1;32m✓ Done in %ds\033[0m\n" "$((SECONDS - start))"
+}
+{{- end }}
 
 # Tools (cached init for faster startup)
 if [[ ! -f ~/.cache/zsh/zoxide.zsh ]] || (( $(date +%s) - $(stat -c %Y ~/.cache/zsh/zoxide.zsh 2>/dev/null || echo 0) > 86400 )); then
