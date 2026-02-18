@@ -1,0 +1,11 @@
+{{- $distro := "" -}}
+{{- if stat "/etc/os-release" -}}
+{{-   range (split "\n" (include "/etc/os-release")) -}}
+{{-     if hasPrefix "ID=" . -}}
+{{-       $distro = trimPrefix "ID=" . -}}
+{{-     end -}}
+{{-   end -}}
+{{- end -}}
+
+[data]
+    distro = {{ $distro | quote }}

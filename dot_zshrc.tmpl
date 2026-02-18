@@ -1,0 +1,68 @@
+# Path (consolidated - no need for .deno/env and .local/bin/env)
+export PATH="$HOME/.local/bin:$HOME/.deno/bin:$HOME/.juliaup/bin:$PATH"
+export FPATH="$HOME/completions:$FPATH"
+
+# Oh My Zsh
+export ZSH="$HOME/.oh-my-zsh"
+ZSH_THEME="robbyrussell"
+HYPHEN_INSENSITIVE="true"
+zstyle ':omz:update' mode auto
+zstyle ':omz:update' frequency 13
+ENABLE_CORRECTION="true"
+COMPLETION_WAITING_DOTS="true"
+HIST_STAMPS="dd.mm.yyyy"
+plugins=(git)
+
+# Cache compinit - only regenerate once per day
+zstyle ':omz:alpha:lib:completion' caching yes
+source $ZSH/oh-my-zsh.sh
+{{- if eq .distro "fedora" }}
+
+# Aliases
+sysup() {
+  command sudo -v || return 1
+  setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
+  local dnlog=$(mktemp) fplog=$(mktemp) rslog=$(mktemp) dnolog=$(mktemp) nplog=$(mktemp)
+  local start=$SECONDS
+  command sudo dnf up -y &>"$dnlog" &
+  local -a pids=($!) names=(dnf)
+  setsid flatpak upgrade -y &>"$fplog" &
+  pids+=($!); names+=(flatpak)
+  rustup update &>"$rslog" &
+  pids+=($!); names+=(rustup)
+  deno upgrade &>"$dnolog" &
+  pids+=($!); names+=(deno)
+  command sudo npm update -g --fund=false --loglevel=error &>"$nplog" &
+  pids+=($!); names+=(npm)
+  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
+  while true; do
+    local running=() done_count=0
+    for j in {1..${#pids}}; do
+      kill -0 ${pids[$j]} 2>/dev/null && running+=("${names[$j]}") || ((done_count++))
+    done
+    (( ${#running} == 0 )) && break
+    printf "\r\033[K  \033[33m${spin:$((i%${#spin})):1}\033[0m %d/%d done · %s" \
+      "$done_count" "${#pids}" "${(j:, :)running}"
+    ((i++)); sleep 0.1
+  done
+  printf "\r\033[K"
+  wait
+  for label log in dnf "$dnlog" flatpak "$fplog" rustup "$rslog" deno "$dnolog" npm "$nplog"; do
+    printf "\n\033[1;36m--- %s ---\033[0m\n" "$label"; cat "$log"
+  done
+  rm -f "$dnlog" "$fplog" "$rslog" "$dnolog" "$nplog"
+  printf "\n\033[1;32m✓ Done in %ds\033[0m\n" "$((SECONDS - start))"
+}
+{{- end }}
+
+# Tools (cached init for faster startup)
+if [[ ! -f ~/.cache/zsh/zoxide.zsh ]] || (( $(date +%s) - $(stat -c %Y ~/.cache/zsh/zoxide.zsh 2>/dev/null || echo 0) > 86400 )); then
+  mkdir -p ~/.cache/zsh
+  zoxide init zsh > ~/.cache/zsh/zoxide.zsh
+  starship init zsh > ~/.cache/zsh/starship.zsh
+fi
+source ~/.cache/zsh/zoxide.zsh
+source ~/.cache/zsh/starship.zsh
+
+# CHROME_BIN (resolved on demand, not every shell start)
+export CHROME_BIN="${CHROME_BIN:-$(command -v chromium-browser 2>/dev/null || command -v chromium 2>/dev/null || command -v google-chrome 2>/dev/null)}"
