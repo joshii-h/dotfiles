@@ -144,5 +144,8 @@ fi
 source ~/.cache/zsh/zoxide.zsh
 source ~/.cache/zsh/starship.zsh
 
+# Bitwarden CLI
+alias bwu='export BW_SESSION=$(bw unlock --raw)'
+
 # CHROME_BIN (resolved on demand, not every shell start)
 export CHROME_BIN="${CHROME_BIN:-$(command -v chromium-browser 2>/dev/null || command -v chromium 2>/dev/null || command -v google-chrome 2>/dev/null)}"
