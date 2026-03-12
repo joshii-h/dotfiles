@@ -21,7 +21,7 @@ source $ZSH/oh-my-zsh.sh
 sysup() {
   command sudo -v || return 1
   setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
-  local -a names=(dnf flatpak rustup deno npm)
+  local -a names=(dnf flatpak rustup deno npm dotfiles)
   local -a logs pids
   for n in $names; do logs+=($(mktemp)); done
   local start=$SECONDS
@@ -34,6 +34,8 @@ sysup() {
   deno upgrade &>"${logs[4]}" &
   pids+=($!)
   command sudo npm update -g --fund=false --loglevel=error &>"${logs[5]}" &
+  pids+=($!)
+  chezmoi update --no-tty &>"${logs[6]}" &
   pids+=($!)
   local lines=$(( ${#names} + 2 ))
   local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 drawn=0
@@ -148,6 +150,14 @@ source ~/.cache/zsh/starship.zsh
 
 # Bitwarden CLI
 alias bwu='export BW_SESSION=$(bw unlock --raw)'
+
+# fzf: use fd as backend, follow symlinks, respect .gitignore
+export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+export FZF_DEFAULT_OPTS='--height 40% --layout=reverse --border'
+export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+
+# ripgrep config
+export RIPGREP_CONFIG_PATH="$HOME/.config/ripgrep/config"
 
 # CHROME_BIN (resolved on demand, not every shell start)
 export CHROME_BIN="${CHROME_BIN:-$(command -v chromium-browser 2>/dev/null || command -v chromium 2>/dev/null || command -v google-chrome 2>/dev/null)}"
