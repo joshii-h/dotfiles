@@ -41,11 +41,16 @@ if [[ -d "${AI}/odysseus/.git" ]] && command -v docker >/dev/null; then
   # nicht an lokalen Aenderungen scheitert, dann nach dem Pull neu anwenden.
   git -C "${AI}/odysseus" checkout -- src/tool_parsing.py 2>/dev/null
   git -C "${AI}/odysseus" pull --ff-only 2>&1 | tail -1
-  python3 "${AI}/odysseus-patches/qwen3_function_tag_patch.py" \
-    "${AI}/odysseus/src/tool_parsing.py" 2>&1 | tail -2 \
-    || echo "!! WARNUNG: qwen3-function-tag-Patch NICHT angewendet (Anchor fehlt? upstream-Refactor)"
-  # --build ist cache-schnell wenn nichts geaendert; faengt auch First-Run (Image fehlt) ab
-  ( cd "${AI}/odysseus" && docker compose up -d --build ) 2>&1 | tail -3
+  # Rebuild NUR wenn der Patch sauber sitzt (set -o pipefail -> if sieht den
+  # Patcher-Exitcode, nicht tail). Scheitert der Patch (Anchor weg nach upstream-
+  # Refactor), NICHT bauen -> altes, GEPATCHTES Image laeuft weiter, statt ein
+  # ungepatchtes zu backen (das qwen3-Tool-Calls still wieder kaputtmachen wuerde).
+  if python3 "${AI}/odysseus-patches/qwen3_function_tag_patch.py" \
+       "${AI}/odysseus/src/tool_parsing.py" 2>&1 | tail -2; then
+    ( cd "${AI}/odysseus" && docker compose up -d --build ) 2>&1 | tail -3
+  else
+    echo "!! WARNUNG: qwen3-function-tag-Patch NICHT angewendet (Anchor fehlt?) -> Rebuild uebersprungen, altes gepatchtes Image bleibt aktiv"
+  fi
 fi
 
 # --- Hermes Agent (nativ, uv-venv gegen lokales Ollama) ---
