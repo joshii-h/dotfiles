@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Microsoft Teams (msteams:// Handler)
+Exec=@@EXEC@@ %u
+MimeType=x-scheme-handler/msteams;
+Icon=@@ICON@@
+Terminal=false
+NoDisplay=true
+StartupNotify=true

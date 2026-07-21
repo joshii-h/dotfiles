@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# msteams-pwa-handler
+# Öffnet msteams:// Deeplinks in einer als PWA (firefoxpwa) installierten
+# Microsoft-Teams-Instanz, indem der Link nach https://teams.microsoft.com/...
+# umgeschrieben und im PWA-Fenster geöffnet wird.
+#
+# Die firefoxpwa-Site-ID wird zur Laufzeit automatisch ermittelt, damit derselbe
+# Wrapper ohne Anpassung auf jedem System läuft. Zum Überschreiben:
+#   MSTEAMS_PWA_ID=<26-stellige-ID> msteams-pwa-handler <url>
+set -euo pipefail
+
+die() {
+    echo "msteams-pwa-handler: $*" >&2
+    command -v notify-send >/dev/null 2>&1 && notify-send "Microsoft Teams" "$*" || true
+    exit 1
+}
+
+command -v firefoxpwa >/dev/null 2>&1 \
+    || die "firefoxpwa ist nicht installiert."
+
+# Teams-PWA-ID ermitteln (per Env überschreibbar). Match über die
+# teams.microsoft.com-URL, damit ein umbenannter/lokalisierter App-Name egal ist.
+PWA_ID="${MSTEAMS_PWA_ID:-$(firefoxpwa profile list 2>/dev/null \
+    | grep -iE 'teams\.microsoft\.com' \
+    | grep -oE '\([0-9A-Z]{26}\)' | tr -d '()' | head -n1)}"
+
+[[ -n "$PWA_ID" ]] \
+    || die "Keine als firefoxpwa-PWA installierte Teams-Instanz gefunden."
+
+url="${1:-}"
+if [[ -z "$url" ]]; then
+    # Ohne Link: Teams einfach normal starten.
+    exec firefoxpwa site launch "$PWA_ID"
+fi
+
+# msteams:[//teams.microsoft.com]/l/...  ->  https://teams.microsoft.com/l/...
+rest="${url#msteams:}"
+rest="${rest#//teams.microsoft.com}"
+rest="${rest#//}"
+[[ "$rest" == /* ]] || rest="/$rest"
+
+exec firefoxpwa site launch "$PWA_ID" --url "https://teams.microsoft.com${rest}"
