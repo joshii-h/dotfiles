@@ -39,7 +39,10 @@ if [[ -d "${AI}/odysseus/.git" ]] && command -v docker >/dev/null; then
   # tool_parsing.py traegt unseren qwen3-function-tag-Patch (qwen3-coder
   # Text-Tool-Calls). Vor dem Pull auf HEAD zuruecksetzen, damit --ff-only
   # nicht an lokalen Aenderungen scheitert, dann nach dem Pull neu anwenden.
-  git -C "${AI}/odysseus" checkout -- src/tool_parsing.py 2>/dev/null
+  # config/searxng/settings.yml traegt unseren searxng-engines-Patch (kuratierte
+  # Engines + News gegen SEO-Fluff). Wie tool_parsing.py vor dem Pull auf HEAD
+  # zuruecksetzen, damit --ff-only nicht an lokalen Aenderungen scheitert.
+  git -C "${AI}/odysseus" checkout -- src/tool_parsing.py config/searxng/settings.yml 2>/dev/null
   git -C "${AI}/odysseus" pull --ff-only 2>&1 | tail -1
   # Rebuild NUR wenn der Patch sauber sitzt (set -o pipefail -> if sieht den
   # Patcher-Exitcode, nicht tail). Scheitert der Patch (Anchor weg nach upstream-
@@ -47,6 +50,15 @@ if [[ -d "${AI}/odysseus/.git" ]] && command -v docker >/dev/null; then
   # ungepatchtes zu backen (das qwen3-Tool-Calls still wieder kaputtmachen wuerde).
   if python3 "${AI}/odysseus-patches/qwen3_function_tag_patch.py" \
        "${AI}/odysseus/src/tool_parsing.py" 2>&1 | tail -2; then
+    # SearXNG-Engines-Patch: anders als tool_parsing ist ein Fehlschlag hier
+    # NICHT fatal -> ohne Patch faellt searxng auf Default-Engines zurueck
+    # (schlechtere Suche, aber funktionsfaehig). Nur warnen, Rebuild trotzdem,
+    # damit der kritische tool_parsing-Fix greift. Der Patch setzt zudem das
+    # Regen-Sentinel odysseus-local-searxng-json-2026-05-30 ins Template, sodass
+    # der searxng-Entrypoint settings.yml beim Neustart aus dem Template regeneriert.
+    python3 "${AI}/odysseus-patches/searxng_engines_patch.py" \
+         "${AI}/odysseus/config/searxng/settings.yml" 2>&1 | tail -2 \
+      || echo "!! WARNUNG: searxng-engines-Patch NICHT angewendet (Anchor weg?) -> Default-Engines aktiv"
     ( cd "${AI}/odysseus" && docker compose up -d --build ) 2>&1 | tail -3
   else
     echo "!! WARNUNG: qwen3-function-tag-Patch NICHT angewendet (Anchor fehlt?) -> Rebuild uebersprungen, altes gepatchtes Image bleibt aktiv"
