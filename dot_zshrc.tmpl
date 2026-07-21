@@ -170,7 +170,7 @@ _sysup_release() {
 sysup() {
   command sudo -v || return 1
   setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
-  local -a names=(emerge flatpak dotfiles)
+  local -a names=(emerge flatpak dotfiles ai)
   local -a logs pids
   for n in $names; do logs+=($(mktemp)); done
   local start=$SECONDS
@@ -179,6 +179,11 @@ sysup() {
   setsid flatpak upgrade -y &>"${logs[2]}" &
   pids+=($!)
   chezmoi update --no-tty &>"${logs[3]}" &
+  local dotfiles_pid=$!
+  pids+=($dotfiles_pid)
+  # ai: wait for the dotfiles job (so the freshly-synced ai scripts + Odysseus
+  # patch are in place), then run the local AI-stack updater.
+  { while kill -0 $dotfiles_pid 2>/dev/null; do sleep 1; done; ~/ai/ai-update.sh; } &>"${logs[4]}" &
   pids+=($!)
   local lines=$(( ${#names} + 2 ))
   local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 drawn=0

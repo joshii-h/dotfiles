@@ -1,3 +1,17 @@
 README.md
 LICENSE
 msteams-pwa-handler/**
+
+# AI-Stack: nur die Skripte/Configs versionieren, nicht die schweren
+# Laufzeit-/Modell-/Clone-Verzeichnisse und generierten Artefakte.
+ai/venv/**
+ai/ComfyUI/**
+ai/odysseus/**
+ai/hermes-agent/**
+ai/models/**
+ai/.miopen/**
+ai/media-mcp/outputs/**
+ai/incoming/**
+ai/*.log
+ai/*.png
+ai/*.wav

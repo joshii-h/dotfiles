@@ -1,0 +1,9 @@
+# ROCm-PyTorch-Pins (repo.radeon.com .lw-Wheels, linken System-ROCm 7.2).
+# Zweck: pip darf beim App-Layer-Upgrade NIEMALS torch/vision/audio/triton
+# austauschen (sonst zieht PyPI CUDA-Torch, hoehere Version gewinnt).
+# Diese Versionen sind an die emerge-gepflegte System-ROCm-Version gekoppelt;
+# echter Torch-Bump passiert nur, wenn ROCm via @world hochgeht -> setup-ai.sh.
+torch==2.10.0+rocm7.2.3.lw.git1a270074
+torchvision==0.25.0+rocm7.2.3.git82df5f59
+torchaudio==2.10.0+rocm7.2.3.git5047768f
+triton==3.6.0+rocm7.2.3.git4ed88892
