@@ -15,3 +15,7 @@
 	dark = true
 [merge]
 	conflictstyle = zdiff3
+{{- if eq .distro "fedora" }}
+[safe]
+	directory = /home/joshii/Devel/git/FASTSHIT/IMTrack-Overview
+{{- end }}
