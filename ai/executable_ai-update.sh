@@ -16,7 +16,13 @@ pipu() { "$PIP" install --upgrade --disable-pip-version-check -c "$CONSTR" "$@";
 
 echo ">> App-Layer aktualisieren (torch bleibt gepinnt)"
 pipu diffusers transformers accelerate safetensors huggingface_hub \
-     librosa soundfile 'mcp[cli]' uvicorn 2>&1 | tail -4
+     librosa soundfile 'mcp[cli]' uvicorn pyannote.audio 2>&1 | tail -4
+
+# torchcodec IMMER entfernen: pyannote.audio zieht es als Dep rein, aber der
+# PyPI-Build ist CUDA (libnvrtc) -> sein fehlschlagendes torch.ops.load_library
+# beschaedigt die GPU-Op-Registry -> Whisper UND pyannote brechen mit roctracer-
+# SIGABRT ab. Wir laden Audio selbst via soundfile -> torchcodec unnoetig.
+"$VENV/bin/pip" uninstall -y torchcodec >/dev/null 2>&1 && echo ">> torchcodec entfernt (GPU-Op-Registry-Schutz)" || true
 
 if [[ -d "${AI}/ComfyUI/.git" ]]; then
   echo ">> ComfyUI aktualisieren"
@@ -33,42 +39,48 @@ if [[ -d "${AI}/ComfyUI/.git" ]]; then
   done
 fi
 
-# --- Odysseus (Docker-Frontend gegen lokales Ollama) ---
-if [[ -d "${AI}/odysseus/.git" ]] && command -v docker >/dev/null; then
-  echo ">> Odysseus aktualisieren"
-  # tool_parsing.py traegt unseren qwen3-function-tag-Patch (qwen3-coder
-  # Text-Tool-Calls). Vor dem Pull auf HEAD zuruecksetzen, damit --ff-only
-  # nicht an lokalen Aenderungen scheitert, dann nach dem Pull neu anwenden.
-  # config/searxng/settings.yml traegt unseren searxng-engines-Patch (kuratierte
-  # Engines + News gegen SEO-Fluff). Wie tool_parsing.py vor dem Pull auf HEAD
-  # zuruecksetzen, damit --ff-only nicht an lokalen Aenderungen scheitert.
-  git -C "${AI}/odysseus" checkout -- src/tool_parsing.py config/searxng/settings.yml 2>/dev/null
-  git -C "${AI}/odysseus" pull --ff-only 2>&1 | tail -1
-  # Rebuild NUR wenn der Patch sauber sitzt (set -o pipefail -> if sieht den
-  # Patcher-Exitcode, nicht tail). Scheitert der Patch (Anchor weg nach upstream-
-  # Refactor), NICHT bauen -> altes, GEPATCHTES Image laeuft weiter, statt ein
-  # ungepatchtes zu backen (das qwen3-Tool-Calls still wieder kaputtmachen wuerde).
-  if python3 "${AI}/odysseus-patches/qwen3_function_tag_patch.py" \
-       "${AI}/odysseus/src/tool_parsing.py" 2>&1 | tail -2; then
-    # SearXNG-Engines-Patch: anders als tool_parsing ist ein Fehlschlag hier
-    # NICHT fatal -> ohne Patch faellt searxng auf Default-Engines zurueck
-    # (schlechtere Suche, aber funktionsfaehig). Nur warnen, Rebuild trotzdem,
-    # damit der kritische tool_parsing-Fix greift. Der Patch setzt zudem das
-    # Regen-Sentinel odysseus-local-searxng-json-2026-05-30 ins Template, sodass
-    # der searxng-Entrypoint settings.yml beim Neustart aus dem Template regeneriert.
-    python3 "${AI}/odysseus-patches/searxng_engines_patch.py" \
-         "${AI}/odysseus/config/searxng/settings.yml" 2>&1 | tail -2 \
-      || echo "!! WARNUNG: searxng-engines-Patch NICHT angewendet (Anchor weg?) -> Default-Engines aktiv"
-    ( cd "${AI}/odysseus" && docker compose up -d --build ) 2>&1 | tail -3
-  else
-    echo "!! WARNUNG: qwen3-function-tag-Patch NICHT angewendet (Anchor fehlt?) -> Rebuild uebersprungen, altes gepatchtes Image bleibt aktiv"
-  fi
+# --- Standalone-SearXNG (entkoppelt von Odysseus, 2026-07-25) ---
+# Odysseus wurde entfernt -> alles laeuft ueber Hermes. SearXNG ist jetzt ein
+# eigenstaendiger Ein-Container-Stack (~/ai/searxng) und dient als Such-Backend
+# fuer media-mcp `deep_research` + Hermes `web_search`. Kein Patchen mehr noetig
+# (eigene settings.yml). restart:unless-stopped -> startet mit dem Docker-Daemon;
+# hier nur sicherstellen, dass es laeuft (Image ist gepinnt, kein --build/pull).
+if [[ -f "${AI}/searxng/docker-compose.yml" ]] && command -v docker >/dev/null; then
+  echo ">> SearXNG (standalone) sicherstellen"
+  ( cd "${AI}/searxng" && docker compose up -d ) 2>&1 | tail -2
 fi
 
 # --- Hermes Agent (nativ, uv-venv gegen lokales Ollama) ---
 if [[ -d "${AI}/hermes-agent/.git" ]] && command -v uv >/dev/null; then
   echo ">> Hermes aktualisieren"
+  # agent/transports/chat_completions.py traegt unseren qwen-function-eq-Patch:
+  # Fallback-Parser fuer text-format <function=NAME><parameter=K>V</parameter>
+  # </function>-Tool-Calls, die qwen3-coder/Ollama gelegentlich statt nativer
+  # tool_calls in den content leakt (sonst landet der rohe Block als "Antwort").
+  # Vor dem Pull auf HEAD zuruecksetzen, damit --ff-only nicht an der lokalen
+  # Aenderung scheitert, dann nach dem Pull neu anwenden. Hermes ist ein
+  # editable-install -> die gepatchte Datei ist sofort live (kein Rebuild).
+  # Anders als Odysseus gibt es keine Build-Isolation: schlaegt der Patch fehl
+  # (Anchor weg nach upstream-Refactor), laeuft Hermes ungepatcht weiter -> nur
+  # WARNEN (nicht abbrechen), Update trotzdem durchziehen.
+  CC="${AI}/hermes-agent/agent/transports/chat_completions.py"
+  _ccbak="$(mktemp)"; cp "$CC" "$_ccbak" 2>/dev/null   # zuletzt gepatchte Datei sichern
+  git -C "${AI}/hermes-agent" checkout -- agent/transports/chat_completions.py 2>/dev/null
   git -C "${AI}/hermes-agent" pull --ff-only 2>&1 | tail -1
+  if python3 "${AI}/odysseus-patches/hermes_function_eq_patch.py" "$CC" 2>&1 | tail -2; then
+    rm -f ~/.hermes-patch-missing 2>/dev/null
+  else
+    # Patch fehlgeschlagen (Anchor weg nach upstream-Refactor ODER Skript fehlt
+    # durch chezmoi-Drift): NICHT ungepatcht laufen lassen -> die zuletzt
+    # gepatchte Datei wiederherstellen (besser altes gepatchtes Transport-Modul
+    # als der wieder offene <function=>-Leak). Bleibt sie trotzdem ungepatcht,
+    # ein dauerhaftes Signal setzen (ueberlebt das Scrollen der sysup-Ausgabe).
+    echo "!! WARNUNG: qwen-function-eq-Patch NICHT angewendet -> stelle zuletzt gepatchte Datei wieder her"
+    cp "$_ccbak" "$CC" 2>/dev/null
+    grep -q 'HERMES-PATCH:qwen-function-eq' "$CC" 2>/dev/null \
+      || { echo "!! Hermes laeuft UNGEPATCHT (<function=>-Leak aktiv) — siehe ~/.hermes-patch-missing"; touch ~/.hermes-patch-missing; }
+  fi
+  rm -f "$_ccbak"
   ( cd "${AI}/hermes-agent" && uv pip install --python .venv/bin/python -e ".[cli,mcp,cron]" ) 2>&1 | tail -2
 fi
 
@@ -76,13 +88,8 @@ fi
 if [[ -f /etc/init.d/media-mcp ]] && command -v sudo >/dev/null; then
   echo ">> media-mcp neustarten (aktualisierten Code laden)"
   sudo rc-service media-mcp restart 2>&1 | tail -1
-  # Odysseus' SSE-Verbindung wird durch den Restart abgestanden -> neu verbinden,
-  # damit transcribe/generate_image im Chat weiter funktionieren.
-  if [[ -d "${AI}/odysseus/.git" ]] && command -v docker >/dev/null; then
-    echo ">> Odysseus neu verbinden (frische Media-MCP-SSE-Verbindung)"
-    sleep 3
-    ( cd "${AI}/odysseus" && docker compose restart odysseus ) 2>&1 | tail -1
-  fi
+  # Hermes verbindet die media-MCP-SSE beim naechsten Chat automatisch neu
+  # (kein separater Reconnect noetig -- Odysseus, das das brauchte, ist weg).
 fi
 
 # Sanity: torch muss ROCm-Build bleiben (kein GPU-Init, damit ohne render-Gruppe ok)
