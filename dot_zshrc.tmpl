@@ -174,7 +174,11 @@ sysup() {
   local -a logs pids
   for n in $names; do logs+=($(mktemp)); done
   local start=$SECONDS
-  { command sudo emerge --sync && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world && command sudo emerge --depclean; } &>"${logs[1]}" &
+  # eclean-kernel laeuft am Ende der emerge-Kette, weil emerge zuvor evtl. einen
+  # neuen Kernel installiert hat. -n 3 = die 3 neuesten behalten; der laufende
+  # Kernel wird immer geschuetzt, und ohne -d bleibt alles unangetastet, was
+  # GRUB referenziert. Raeumt auch /lib/modules + regeneriert grub.cfg.
+  { command sudo emerge --sync && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world && command sudo emerge --depclean && command sudo eclean-kernel -n 3; } &>"${logs[1]}" &
   pids+=($!)
   setsid flatpak upgrade -y &>"${logs[2]}" &
   pids+=($!)
