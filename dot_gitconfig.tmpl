@@ -15,6 +15,11 @@
 	dark = true
 [merge]
 	conflictstyle = zdiff3
+# rebase --fork-point hat beim dotfiles-Repo einen Konflikt verschluckt und
+# Commits verloren (Forgejo=SSOT, GitHub/Codeberg sind Force-Push-Mirrors).
+# Ohne fork-point knallt der Konflikt sichtbar, statt still zu droppen.
+[rebase]
+	forkPoint = false
 {{- if eq .distro "fedora" }}
 [safe]
 	directory = /home/joshii/Devel/git/FASTSHIT/IMTrack-Overview
