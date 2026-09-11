@@ -126,10 +126,15 @@ PATCHES = [
         + "def _reasoning_config_for_model(model: str, reasoning_config: dict | None) -> dict | None:\n",
     ),
     (
+        # Anker 3 neu verankert fuer Hermes 0.21.1 (2026-09-11): normalize_response
+        # liest den Inhalt jetzt ueber getattr(msg, "content", None) und holt refusal
+        # via _attr_or_model_extra statt getattr. Einhaengepunkt und Semantik bleiben
+        # gleich - direkt nachdem content gelesen wurde, vor der refusal-Behandlung,
+        # wo tool_calls bereits berechnet ist.
         "3: salvage in normalize_response",
-        "        content = msg.content\n"
-        '        refusal = getattr(msg, "refusal", None)\n',
-        "        content = msg.content\n"
+        '        content = getattr(msg, "content", None)\n'
+        '        refusal = _attr_or_model_extra(msg, "refusal")\n',
+        '        content = getattr(msg, "content", None)\n'
         "        # HERMES-PATCH:qwen-function-eq — salvage text-format tool calls\n"
         "        # (<function=NAME><parameter=K>V</parameter></function>) that some\n"
         "        # local models (qwen3-coder/Ollama) leak into content instead of\n"
@@ -141,7 +146,7 @@ PATCHES = [
         "                content = _eq_clean or None\n"
         '                if finish_reason in (None, "stop"):\n'
         '                    finish_reason = "tool_calls"\n'
-        '        refusal = getattr(msg, "refusal", None)\n',
+        '        refusal = _attr_or_model_extra(msg, "refusal")\n',
     ),
 ]
 
