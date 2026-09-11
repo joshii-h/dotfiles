@@ -1206,9 +1206,9 @@ def _comfy_timeout_for(steps: int) -> float:
     return max(300, int(steps) * 8)
 
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import TextContent, ImageContent
-mcp = FastMCP("battlestation-media", host="0.0.0.0", port=PORT)
+mcp = MCPServer("battlestation-media")
 
 
 # --------------------------------------------------------------------------
@@ -2122,7 +2122,7 @@ def _image_result(out: pathlib.Path, prompt: str, size: str = "",
     b64 = base64.b64encode(out.read_bytes()).decode()
     return [
         TextContent(type="text", text="\n".join(lines)),
-        ImageContent(type="image", data=b64, mimeType="image/png"),
+        ImageContent(type="image", data=b64, mime_type="image/png"),
     ]
 
 
@@ -2303,4 +2303,4 @@ if __name__ == "__main__":
     threading.Thread(target=_idle_reaper, daemon=True).start()
     sys.stderr.write(f"[media-mcp] SSE auf 0.0.0.0:{PORT}/sse  "
                      f"(idle-unload {IDLE_UNLOAD_S}s, ComfyUI @ {COMFY_URL})\n")
-    mcp.run(transport="sse")
+    mcp.run(transport="sse", host="0.0.0.0", port=PORT)

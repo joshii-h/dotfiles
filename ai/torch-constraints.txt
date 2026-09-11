@@ -9,8 +9,3 @@ torchaudio==2.10.0+rocm7.2.3.git5047768f
 triton==3.6.0+rocm7.2.3.git4ed88892
 numpy<2.5  # numba 0.66 vertraegt kein numpy>=2.5 (librosa/chatterbox brauchen numba)
 setuptools<81  # perth/chatterbox brauchen pkg_resources (ab setuptools 81 entfernt)
-mcp<2  # media-mcp + homelab-mcp nutzen die 1.x-API (mcp.server.fastmcp.FastMCP).
-       # In mcp 2.x heisst FastMCP MCPServer, der Import knallt -> beide Dienste
-       # crashen beim Start. supervise-daemon respawnt endlos und rc-service
-       # meldet trotzdem "started", der Ausfall bleibt also unsichtbar.
-       # Pin raus, sobald beide server.py auf MCPServer portiert sind.

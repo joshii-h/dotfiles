@@ -23,7 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 # --------------------------------------------------------------------------- #
 # Konfiguration
@@ -100,7 +100,7 @@ def _adguard_headers() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-mcp = FastMCP("battlestation-homelab", host="0.0.0.0", port=PORT)
+mcp = MCPServer("battlestation-homelab")
 
 
 # --------------------------------------------------------------------------- #
@@ -207,4 +207,4 @@ def adguard_block_domain(domain: str) -> str:
 
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="sse", host="0.0.0.0", port=PORT)
