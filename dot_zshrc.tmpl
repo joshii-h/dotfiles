@@ -167,6 +167,30 @@ _sysup_release() {
 {{- end }}
 {{- if eq .distro "gentoo" }}
 
+# emerge --sync scheitert sporadisch, weil in der Rotation von
+# rsync.europe.gentoo.org einzelne Hosts eine inkonsistente Manifest-Kette
+# ausliefern: die signierte Manifest ist neuer als das metadata/Manifest.gz,
+# das derselbe Host serviert (2026-09-11 an 78.128.80.69 verifiziert).
+# Ein zweiter Versuch landet praktisch immer auf einem gesunden Mirror.
+# Klappt auch der nicht, laeuft die Update-Kette trotzdem weiter: die
+# Quarantaene laesst den lokalen Tree unangetastet, er ist also weiter
+# benutzbar - nur eben eine Generation alt.
+_sysup_sync() {
+  local out try rc
+  for try in 1 2; do
+    printf ">>> Syncing repositories (Versuch %d)...\n" $try
+    out=$(command sudo emerge --sync 2>&1); rc=$?
+    if (( rc == 0 )); then
+      print -r -- "$out"
+      (( try > 1 )) && printf " * IMPORTANT: emerge --sync brauchte %d Versuche (defekter Mirror in der Rotation)\n" $try
+      return 0
+    fi
+  done
+  print -r -- "$out"
+  printf " * IMPORTANT: emerge --sync nach 2 Versuchen fehlgeschlagen - Portage-Tree bleibt eine Generation alt, @world laeuft trotzdem weiter\n"
+  return 0
+}
+
 # Kompakter emerge-Report statt des kompletten Build-Logs. Was wirklich
 # installiert/entfernt wurde, kommt aus ">>> Installing"/">>> Unmerging"
 # (ueberlebt damit auch Teilabbrueche), die Alt->Neu-Versionen und Flags
@@ -282,7 +306,7 @@ sysup() {
   # neuen Kernel installiert hat. -n 3 = die 3 neuesten behalten; der laufende
   # Kernel wird immer geschuetzt, und ohne -d bleibt alles unangetastet, was
   # GRUB referenziert. Raeumt auch /lib/modules + regeneriert grub.cfg.
-  { command sudo emerge --sync && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world && command sudo emerge --depclean && command sudo eclean-kernel -n 3; echo "__SYSUP_RC=$?"; } &>"${logs[1]}" &
+  { _sysup_sync && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world && command sudo emerge --depclean && command sudo eclean-kernel -n 3; echo "__SYSUP_RC=$?"; } &>"${logs[1]}" &
   pids+=($!)
   setsid flatpak upgrade -y &>"${logs[2]}" &
   pids+=($!)
