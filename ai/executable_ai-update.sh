@@ -14,9 +14,21 @@ CONSTR="${AI}/torch-constraints.txt"
 
 pipu() { "$PIP" install --upgrade --disable-pip-version-check -c "$CONSTR" "$@"; }
 
+# pip/uv/git/docker sind gespraechig, und das frühere "| tail -N" erwischte
+# ausgerechnet die "Requirement already satisfied"-Zeilen statt des Ergebnisses
+# (das steht bei pip weiter oben). say() behaelt stattdessen nur Zeilen mit
+# Aussagekraft - Installationen, Updates, Fehler - und quittiert einen
+# rauschfreien Lauf mit einem Wort, damit keine leere Sektion stehenbleibt.
+SIGNAL='Successfully (installed|uninstalled)|^Installed [0-9]+ package|^ [~+-] |^Updating [0-9a-f]+\.\.|^Fast-forward|^fatal:|^error:|^ERROR|WARNING:|Cannot |Could not |Container .+ (Started|Created|Recreated|Running)'
+say() {
+  local idle="${1:-unveraendert}" out
+  out="$(grep -aE "$SIGNAL" | cut -c1-150)"
+  if [[ -n "$out" ]]; then sed 's/^[[:space:]]*/   /' <<<"$out"; else echo "   ${idle}"; fi
+}
+
 echo ">> App-Layer aktualisieren (torch bleibt gepinnt)"
 pipu diffusers transformers accelerate safetensors huggingface_hub \
-     librosa soundfile 'mcp[cli]' uvicorn pyannote.audio 2>&1 | tail -4
+     librosa soundfile 'mcp[cli]' uvicorn pyannote.audio 2>&1 | say
 
 # torchcodec IMMER entfernen: pyannote.audio zieht es als Dep rein, aber der
 # PyPI-Build ist CUDA (libnvrtc) -> sein fehlschlagendes torch.ops.load_library
@@ -26,16 +38,19 @@ pipu diffusers transformers accelerate safetensors huggingface_hub \
 
 if [[ -d "${AI}/ComfyUI/.git" ]]; then
   echo ">> ComfyUI aktualisieren"
-  git -C "${AI}/ComfyUI" pull --ff-only 2>&1 | tail -2
+  git -C "${AI}/ComfyUI" pull --ff-only 2>&1 | say "repo aktuell"
   [[ -f "${AI}/ComfyUI/requirements.txt" ]] && \
-    pipu -r "${AI}/ComfyUI/requirements.txt" 2>&1 | tail -2
+    pipu -r "${AI}/ComfyUI/requirements.txt" 2>&1 | say "deps unveraendert"
 
   echo ">> ComfyUI custom_nodes aktualisieren"
   for d in "${AI}/ComfyUI/custom_nodes"/*/; do
     [[ -d "${d}.git" ]] || continue
-    echo "   - $(basename "$d")"
-    git -C "$d" pull --ff-only 2>&1 | tail -1
-    [[ -f "${d}requirements.txt" ]] && pipu -r "${d}requirements.txt" 2>&1 | tail -1
+    _r="$(git -C "$d" pull --ff-only 2>&1 | grep -aE "$SIGNAL" | head -1 | cut -c1-90)"
+    printf '   - %-32s %s\n' "$(basename "$d")" "${_r:-unveraendert}"
+    if [[ -f "${d}requirements.txt" ]]; then
+      _p="$(pipu -r "${d}requirements.txt" 2>&1 | grep -aE "$SIGNAL" | head -2 | cut -c1-150)"
+      [[ -n "$_p" ]] && sed 's/^/     /' <<<"$_p"
+    fi
   done
 fi
 
@@ -47,7 +62,7 @@ fi
 # hier nur sicherstellen, dass es laeuft (Image ist gepinnt, kein --build/pull).
 if [[ -f "${AI}/searxng/docker-compose.yml" ]] && command -v docker >/dev/null; then
   echo ">> SearXNG (standalone) sicherstellen"
-  ( cd "${AI}/searxng" && docker compose up -d ) 2>&1 | tail -2
+  ( cd "${AI}/searxng" && docker compose up -d ) 2>&1 | say "laeuft"
 fi
 
 # --- Hermes Agent (nativ, uv-venv gegen lokales Ollama) ---
@@ -66,8 +81,8 @@ if [[ -d "${AI}/hermes-agent/.git" ]] && command -v uv >/dev/null; then
   CC="${AI}/hermes-agent/agent/transports/chat_completions.py"
   _ccbak="$(mktemp)"; cp "$CC" "$_ccbak" 2>/dev/null   # zuletzt gepatchte Datei sichern
   git -C "${AI}/hermes-agent" checkout -- agent/transports/chat_completions.py 2>/dev/null
-  git -C "${AI}/hermes-agent" pull --ff-only 2>&1 | tail -1
-  if python3 "${AI}/odysseus-patches/hermes_function_eq_patch.py" "$CC" 2>&1 | tail -2; then
+  git -C "${AI}/hermes-agent" pull --ff-only 2>&1 | say "repo aktuell"
+  if python3 "${AI}/odysseus-patches/hermes_function_eq_patch.py" "$CC" 2>&1 | tail -2 | sed -e "s#${AI}/#~/ai/#g" -e 's/^[[:space:]]*/   /'; then
     rm -f ~/.hermes-patch-missing 2>/dev/null
   else
     # Patch fehlgeschlagen (Anchor weg nach upstream-Refactor ODER Skript fehlt
@@ -81,13 +96,13 @@ if [[ -d "${AI}/hermes-agent/.git" ]] && command -v uv >/dev/null; then
       || { echo "!! Hermes laeuft UNGEPATCHT (<function=>-Leak aktiv) — siehe ~/.hermes-patch-missing"; touch ~/.hermes-patch-missing; }
   fi
   rm -f "$_ccbak"
-  ( cd "${AI}/hermes-agent" && uv pip install --python .venv/bin/python -e ".[cli,mcp,cron]" ) 2>&1 | tail -2
+  ( cd "${AI}/hermes-agent" && uv pip install --python .venv/bin/python -e ".[cli,mcp,cron]" ) 2>&1 | say
 fi
 
 # --- Media-MCP-Server (Whisper + SDXL) — chezmoi hat server.py evtl. aktualisiert ---
 if [[ -f /etc/init.d/media-mcp ]] && command -v sudo >/dev/null; then
   echo ">> media-mcp neustarten (aktualisierten Code laden)"
-  sudo rc-service media-mcp restart 2>&1 | tail -1
+  sudo rc-service media-mcp restart 2>&1 | say "neu gestartet"
   # Hermes verbindet die media-MCP-SSE beim naechsten Chat automatisch neu
   # (kein separater Reconnect noetig -- Odysseus, das das brauchte, ist weg).
 fi
