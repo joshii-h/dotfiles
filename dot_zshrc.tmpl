@@ -167,18 +167,122 @@ _sysup_release() {
 {{- end }}
 {{- if eq .distro "gentoo" }}
 
+# Kompakter emerge-Report statt des kompletten Build-Logs. Was wirklich
+# installiert/entfernt wurde, kommt aus ">>> Installing"/">>> Unmerging"
+# (ueberlebt damit auch Teilabbrueche), die Alt->Neu-Versionen und Flags
+# aus der Portage-Planungstabelle ("[ebuild   U  ] ..."). Volles Log siehe
+# ~/.cache/sysup/.
+_sysup_emerge_summary() {
+  local log=$1
+  awk -v logpath="$log" '
+    function atomsplit(s) {
+      sub(/::.*$/, "", s); sub(/:.*$/, "", s); sub(/\.+$/, "", s)
+      A_name = s; A_ver = ""
+      if (match(s, /-[0-9][^-]*(-r[0-9]+)?$/)) {
+        A_name = substr(s, 1, RSTART - 1)
+        A_ver  = substr(s, RSTART + 1)
+      }
+    }
+    { gsub(/\033\[[0-9;]*[a-zA-Z]/, "") }
+
+    /^\[(ebuild|binary)/ {
+      ci    = index($0, "]")
+      inner = substr($0, 2, ci - 2)
+      rest  = substr($0, ci + 1)
+      fl = inner; sub(/^ *(ebuild|binary) */, "", fl); gsub(/ /, "", fl)
+      sub(/^ +/, "", rest)
+      split(rest, f, " ")
+      atomsplit(f[1])
+      key = A_name "-" A_ver
+      flag[key] = fl
+      if (match(rest, /\[[0-9][^]]*\]/)) {
+        o = substr(rest, RSTART + 1, RLENGTH - 2)
+        sub(/::.*$/, "", o); sub(/:.*$/, "", o); sub(/ .*$/, "", o)
+        oldv[key] = o
+      }
+      next
+    }
+
+    /^>>> Installing / {
+      if ($NF !~ /\//) next
+      atomsplit($NF)
+      key = A_name "-" A_ver
+      fg = flag[key]
+      sym = "*"; col = "0"
+      if      (fg ~ /^N/) { sym = "+"; col = "32"; n_new++ }
+      else if (fg ~ /D/)  { sym = "↓"; col = "35"; n_down++ }
+      else if (fg ~ /U/)  { sym = "↑"; col = "36"; n_up++ }
+      else if (fg ~ /R/)  { sym = "⟳"; col = "33"; n_re++ }
+      else               { n_other++ }
+      ver = (oldv[key] != "") ? oldv[key] " → " A_ver : A_ver
+      out[++no] = sprintf("    \033[%sm%s\033[0m %-42s \033[2m%s\033[0m", col, sym, A_name, ver)
+      next
+    }
+
+    /^>>> Unmerging / {
+      if ($NF !~ /\//) next
+      atomsplit($NF)
+      n_rm++
+      gone[++ng] = sprintf("    \033[31m−\033[0m %-42s \033[2m%s\033[0m", A_name, A_ver)
+      next
+    }
+
+    /^Removing / { kern[++nk] = $0; next }
+    /IMPORTANT:/ {
+      line = $0; sub(/^[ *]+/, "", line)
+      if (!seen[line]++) note[++nn] = line
+      next
+    }
+    /!!!|^>>> Failed to emerge|^ \* ERROR: .* failed|returned code = [1-9]/ {
+      line = $0
+      if (match(line, /!!!/)) line = substr(line, RSTART)
+      sub(/^ +/, "", line)
+      if (nf < 12) fail[++nf] = line
+      next
+    }
+    /^__SYSUP_RC=/ { rc = substr($0, 12) + 0 }
+
+    END {
+      hdr = ""
+      if (n_up)    hdr = hdr sprintf("\033[36m↑ %d Updates\033[0m  ", n_up)
+      if (n_new)   hdr = hdr sprintf("\033[32m+ %d neu\033[0m  ", n_new)
+      if (n_re)    hdr = hdr sprintf("\033[33m⟳ %d Rebuilds\033[0m  ", n_re)
+      if (n_down)  hdr = hdr sprintf("\033[35m↓ %d Downgrades\033[0m  ", n_down)
+      if (n_other) hdr = hdr sprintf("%d sonstige  ", n_other)
+      if (n_rm)    hdr = hdr sprintf("\033[31m− %d entfernt\033[0m", n_rm)
+      if (hdr == "") hdr = "\033[2mkeine Paketaenderungen\033[0m"
+      printf "  %s\n", hdr
+      for (i = 1; i <= no; i++) print out[i]
+      for (i = 1; i <= ng; i++) print gone[i]
+      for (i = 1; i <= nk; i++) printf "    \033[2m%s\033[0m\n", kern[i]
+      for (i = 1; i <= nn; i++) printf "  \033[33m!\033[0m %s\n", note[i]
+      if (nf) {
+        printf "  \033[1;31m✗ Fehler:\033[0m\n"
+        for (i = 1; i <= nf; i++) printf "    %s\n", fail[i]
+      } else if (rc != 0) {
+        printf "  \033[1;31m✗ emerge-Kette endete mit Exit-Code %d\033[0m\n", rc
+      }
+      printf "  \033[2mvolles Log: %s\033[0m\n", logpath
+    }
+  ' "$log"
+}
+
 sysup() {
   command sudo -v || return 1
   setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
   local -a names=(emerge flatpak dotfiles ai)
-  local -a logs pids
-  for n in $names; do logs+=($(mktemp)); done
+  # Das emerge-Log bleibt liegen (angezeigt wird nur die Zusammenfassung),
+  # die letzten 10 Laeufe werden aufgehoben.
+  local logdir=$HOME/.cache/sysup
+  mkdir -p $logdir
+  local -a logs=($logdir/emerge-$(date +%Y%m%d-%H%M%S).log) pids
+  for n in ${names[2,-1]}; do logs+=($(mktemp)); done
   local start=$SECONDS
   # eclean-kernel laeuft am Ende der emerge-Kette, weil emerge zuvor evtl. einen
   # neuen Kernel installiert hat. -n 3 = die 3 neuesten behalten; der laufende
   # Kernel wird immer geschuetzt, und ohne -d bleibt alles unangetastet, was
   # GRUB referenziert. Raeumt auch /lib/modules + regeneriert grub.cfg.
-  { command sudo emerge --sync && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world && command sudo emerge --depclean && command sudo eclean-kernel -n 3; } &>"${logs[1]}" &
+  { command sudo emerge --sync && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world && command sudo emerge --depclean && command sudo eclean-kernel -n 3; echo "__SYSUP_RC=$?"; } &>"${logs[1]}" &
   pids+=($!)
   setsid flatpak upgrade -y &>"${logs[2]}" &
   pids+=($!)
@@ -226,9 +330,16 @@ sysup() {
   fi
   wait
   for j in {1..${#names}}; do
-    printf "\n\033[1;36m--- %s ---\033[0m\n" "${names[$j]}"; cat "${logs[$j]}"
+    printf "\n\033[1;36m--- %s ---\033[0m\n" "${names[$j]}"
+    if [[ "${names[$j]}" == emerge ]]; then
+      _sysup_emerge_summary "${logs[$j]}"
+    else
+      cat "${logs[$j]}"
+    fi
   done
-  rm -f "${logs[@]}"
+  rm -f ${logs[2,-1]}
+  local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) )
+  (( $#stale )) && rm -f $stale
   printf "\n\033[1;32m✓ Done in %ds\033[0m\n" "$((SECONDS - start))"
 }
 {{- end }}
