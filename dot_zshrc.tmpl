@@ -209,6 +209,12 @@ _sysup_emerge_summary() {
       }
     }
     # Bei \r-Fortschrittszeilen zaehlt nur, was ein Terminal zuletzt zeigen wuerde.
+    function obs_add(atom,   f, prio) {
+      f = ofile; sub(/:$/, "", f); sub(/.*\/package\./, "", f); sub(/\{,accept_\}/, "accept_", f)
+      prio = (ocat == "nicht installiert") ? 3 : (ocat == "ungültig") ? 2 : 1
+      if (!(atom in oprio)) oorder[++no_obs] = atom
+      if (prio > oprio[atom]) { oprio[atom] = prio; olabel[atom] = ocat " (" f ")" }
+    }
     { gsub(/\033\[[0-9;]*[a-zA-Z]/, ""); sub(/.*\r/, "") }
 
     # Fehlerzeilen eines gescheiterten ersten Sync-Versuchs verwerfen - der
@@ -301,6 +307,19 @@ _sysup_emerge_summary() {
       if (!fseen[line]++ && nf < 12) fail[++nf] = line
       next
     }
+    # eix-test-obsolete: Funde je Paket sammeln (nicht installiert > ungueltig >
+    # ueberfluessig), die Legende der Overlays und Statuszeilen ignorieren.
+    /^__SYSUP_OBSOLETE_BEGIN__/ { obs = 1; next }
+    /^__SYSUP_OBSOLETE_END__/   { obs = 0; next }
+    obs {
+      if (/^Non-matching or empty entries in /) { ocat = "ungültig"; ofile = $NF }
+      else if (/^Redundant in /)               { ocat = "überflüssig"; ofile = $NF }
+      else if (/^Not installed but in /)       { ocat = "nicht installiert"; ofile = $NF }
+      else if (/^(No |Skipping |Found |All |The names|--$)/) ocat = ""
+      else if (ocat != "" && /^\[[A-Z]\] /)       obs_add($2)
+      else if (ocat == "ungültig" && NF && !/^\[[0-9]+\] "/ && !/^\.\.\. /) obs_add($1)
+      next
+    }
     /^__SYSUP_STAGE=/ { stage = substr($0, 15); next }
     /^__SYSUP_RC=/ { rc = substr($0, 12) + 0; rc_seen = 1 }
 
@@ -320,6 +339,10 @@ _sysup_emerge_summary() {
       for (i = 1; i <= nn; i++) printf "  \033[33m!\033[0m %s\n", note[i]
       if (cur_skip != "") { k = cur_skip " (unerfüllte Abhängigkeit)"; if (!sseen[k]++) skip[++ns] = k }
       for (i = 1; i <= ns; i++) printf "  \033[33m⚠ Update übersprungen:\033[0m %s\n", skip[i]
+      if (no_obs) {
+        printf "  \033[33m⚠ %d Leichen in /etc/portage\033[0m \033[2m(nur Hinweis, Details: eix-test-obsolete)\033[0m\n", no_obs
+        for (i = 1; i <= no_obs; i++) printf "    %-42s \033[2m%s\033[0m\n", oorder[i], olabel[oorder[i]]
+      }
       if (nf) {
         printf "  \033[1;31m✗ Fehler:\033[0m\n"
         for (i = 1; i <= nf; i++) printf "    %s\n", fail[i]
@@ -446,7 +469,17 @@ sysup() {
         && echo __SYSUP_STAGE=world         && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world \
         && echo __SYSUP_STAGE=depclean      && command sudo emerge --depclean \
         && echo __SYSUP_STAGE=eclean-kernel && command sudo eclean-kernel -n 3
-      echo "__SYSUP_RC=$?"' &>"${logs[1]}" &!
+      rc=$?
+      # Leichen in /etc/portage (Eintraege fuer nicht installierte, stabil
+      # gewordene oder ungueltige Pakete) nur melden, nie anfassen; aendert
+      # den Exit-Code der Kette nicht. LC_ALL=C: eix uebersetzt seine Ausgabe,
+      # der Report parst die englischen Ueberschriften.
+      if (( $+commands[eix-test-obsolete] )); then
+        echo __SYSUP_OBSOLETE_BEGIN__
+        command sudo eix-update -q && LC_ALL=C eix-test-obsolete
+        echo __SYSUP_OBSOLETE_END__
+      fi
+      echo "__SYSUP_RC=$rc"' &>"${logs[1]}" &!
     local emerge_pid=$!
     pids+=($emerge_pid)
     setsid flatpak upgrade -y &>"${logs[2]}" &!
