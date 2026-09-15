@@ -21,7 +21,7 @@ pipu() { "$PIP" install --upgrade --disable-pip-version-check -c "$CONSTR" "$@";
 # rauschfreien Lauf mit einem Wort, damit keine leere Sektion stehenbleibt.
 SIGNAL='Successfully (installed|uninstalled)|^Installed [0-9]+ package|^ [~+-] |^Updating [0-9a-f]+\.\.|^Fast-forward|^fatal:|^error:|^ERROR|WARNING:|Cannot |Could not |Container .+ (Started|Created|Recreated|Running)'
 say() {
-  local idle="${1:-unveraendert}" out
+  local idle="${1:-unverändert}" out
   out="$(grep -aE "$SIGNAL" | cut -c1-150)"
   if [[ -n "$out" ]]; then sed 's/^[[:space:]]*/   /' <<<"$out"; else echo "   ${idle}"; fi
 }
@@ -40,13 +40,13 @@ if [[ -d "${AI}/ComfyUI/.git" ]]; then
   echo ">> ComfyUI aktualisieren"
   git -C "${AI}/ComfyUI" pull --ff-only 2>&1 | say "repo aktuell"
   [[ -f "${AI}/ComfyUI/requirements.txt" ]] && \
-    pipu -r "${AI}/ComfyUI/requirements.txt" 2>&1 | say "deps unveraendert"
+    pipu -r "${AI}/ComfyUI/requirements.txt" 2>&1 | say "deps unverändert"
 
   echo ">> ComfyUI custom_nodes aktualisieren"
   for d in "${AI}/ComfyUI/custom_nodes"/*/; do
     [[ -d "${d}.git" ]] || continue
     _r="$(git -C "$d" pull --ff-only 2>&1 | grep -aE "$SIGNAL" | head -1 | cut -c1-90)"
-    printf '   - %-32s %s\n' "$(basename "$d")" "${_r:-unveraendert}"
+    printf '   - %-32s %s\n' "$(basename "$d")" "${_r:-unverändert}"
     if [[ -f "${d}requirements.txt" ]]; then
       _p="$(pipu -r "${d}requirements.txt" 2>&1 | grep -aE "$SIGNAL" | head -2 | cut -c1-150)"
       [[ -n "$_p" ]] && sed 's/^/     /' <<<"$_p"
@@ -62,7 +62,7 @@ fi
 # hier nur sicherstellen, dass es laeuft (Image ist gepinnt, kein --build/pull).
 if [[ -f "${AI}/searxng/docker-compose.yml" ]] && command -v docker >/dev/null; then
   echo ">> SearXNG (standalone) sicherstellen"
-  ( cd "${AI}/searxng" && docker compose up -d ) 2>&1 | say "laeuft"
+  ( cd "${AI}/searxng" && docker compose up -d ) 2>&1 | say "läuft"
 fi
 
 # --- Hermes Agent (nativ, uv-venv gegen lokales Ollama) ---
@@ -93,7 +93,7 @@ if [[ -d "${AI}/hermes-agent/.git" ]] && command -v uv >/dev/null; then
     echo "!! WARNUNG: qwen-function-eq-Patch NICHT angewendet -> stelle zuletzt gepatchte Datei wieder her"
     cp "$_ccbak" "$CC" 2>/dev/null
     grep -q 'HERMES-PATCH:qwen-function-eq' "$CC" 2>/dev/null \
-      || { echo "!! Hermes laeuft UNGEPATCHT (<function=>-Leak aktiv) — siehe ~/.hermes-patch-missing"; touch ~/.hermes-patch-missing; }
+      || { echo "!! Hermes läuft UNGEPATCHT (<function=>-Leak aktiv) — siehe ~/.hermes-patch-missing"; touch ~/.hermes-patch-missing; }
   fi
   rm -f "$_ccbak"
   ( cd "${AI}/hermes-agent" && uv pip install --python .venv/bin/python -e ".[cli,mcp,cron]" ) 2>&1 | say
@@ -109,7 +109,7 @@ if [[ -f /etc/init.d/media-mcp ]] && command -v sudo >/dev/null; then
   _state="${XDG_CACHE_HOME:-${HOME}/.cache}/ai-update/media-mcp.sha"
   _now="$( { cat "${AI}"/media-mcp/*.py "${AI}"/media-mcp/*.sh 2>/dev/null; "$PIP" freeze 2>/dev/null; } | sha256sum | cut -d' ' -f1)"
   if [[ "$_now" != "$(cat "$_state" 2>/dev/null)" ]]; then
-    echo ">> media-mcp neustarten (Code oder venv geaendert)"
+    echo ">> media-mcp neustarten (Code oder venv geändert)"
     # Ausgabe selbst auswerten statt ueber say(): OpenRC meldet Fehler als
     # " * ERROR: ..." bzw. "[ !! ]", das matcht SIGNAL nicht - say haette dann
     # "neu gestartet" gedruckt.
@@ -123,7 +123,7 @@ if [[ -f /etc/init.d/media-mcp ]] && command -v sudo >/dev/null; then
     # Hermes verbindet die media-MCP-SSE beim naechsten Chat automatisch neu
     # (kein separater Reconnect noetig -- Odysseus, das das brauchte, ist weg).
   else
-    echo ">> media-mcp: Code und venv unveraendert, kein Neustart"
+    echo ">> media-mcp: Code und venv unverändert, kein Neustart"
   fi
 fi
 
