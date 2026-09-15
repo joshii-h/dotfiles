@@ -277,6 +277,23 @@ _sysup_emerge_summary() {
       if (!seen[line]++) note[++nn] = line
       next
     }
+    # Von Portage uebersprungene Updates (unerfuellte oder maskierte
+    # Abhaengigkeit) brechen nichts ab: als Warnung mit Paket und Grund melden
+    # statt als drei nichtssagende "!!!"-Zeilen unter "Fehler".
+    /^!!! The following update has been skipped/ {
+      if (cur_skip != "") { k = cur_skip " (unerfuellte Abhaengigkeit)"; if (!sseen[k]++) skip[++ns] = k }
+      skipping = 1; cur_skip = ""
+      next
+    }
+    skipping && cur_skip == "" && /^[a-z0-9-]+\/[^ ]+/ { cur_skip = $1; next }
+    /^!!! All ebuilds that could satisfy "/ {
+      dep = $0; sub(/^[^"]*"/, "", dep); sub(/".*$/, "", dep)
+      k = (cur_skip != "" ? cur_skip : "?") " (braucht " dep ", maskiert)"
+      if (!sseen[k]++) skip[++ns] = k
+      skipping = 0; cur_skip = ""
+      next
+    }
+    /^!!! One of the following masked packages is required/ { next }
     /!!!|^>>> Failed to emerge|^ \* ERROR: .* failed|returned code = [1-9]/ {
       line = $0
       if (match(line, /!!!/)) line = substr(line, RSTART)
@@ -301,6 +318,8 @@ _sysup_emerge_summary() {
       for (i = 1; i <= ng; i++) print gone[i]
       for (i = 1; i <= nk; i++) printf "    \033[2m%s\033[0m\n", kern[i]
       for (i = 1; i <= nn; i++) printf "  \033[33m!\033[0m %s\n", note[i]
+      if (cur_skip != "") { k = cur_skip " (unerfuellte Abhaengigkeit)"; if (!sseen[k]++) skip[++ns] = k }
+      for (i = 1; i <= ns; i++) printf "  \033[33m⚠ Update uebersprungen:\033[0m %s\n", skip[i]
       if (nf) {
         printf "  \033[1;31m✗ Fehler:\033[0m\n"
         for (i = 1; i <= nf; i++) printf "    %s\n", fail[i]
@@ -365,7 +384,10 @@ _sysup_lock_live() {
 }
 
 sysup() {
-  command sudo -v || return 1
+  # sudo -v fragt hier trotz NOPASSWD nach dem Passwort: sudoers hat fuer %wheel
+  # zusaetzlich eine Regel MIT Passwort, und -v prueft alle passenden Regeln.
+  # sudo -n true genuegt als Vorab-Check und fragt nur, wenn wirklich noetig.
+  command sudo -n true 2>/dev/null || command sudo -v || return 1
   # NO_BG_NICE: sonst liefen flatpak/chezmoi/ai mit nice +5 (emerge regelt
   # seine Prioritaet selbst ueber PORTAGE_NICENESS).
   setopt LOCAL_OPTIONS LOCAL_TRAPS NO_NOTIFY NO_MONITOR NO_BG_NICE
