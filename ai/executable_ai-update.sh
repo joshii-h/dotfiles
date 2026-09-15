@@ -99,12 +99,32 @@ if [[ -d "${AI}/hermes-agent/.git" ]] && command -v uv >/dev/null; then
   ( cd "${AI}/hermes-agent" && uv pip install --python .venv/bin/python -e ".[cli,mcp,cron]" ) 2>&1 | say
 fi
 
-# --- Media-MCP-Server (Whisper + SDXL) — chezmoi hat server.py evtl. aktualisiert ---
+# --- Media-MCP-Server (Whisper + SDXL) ---
+# Nur neu starten, wenn sich sein Code (chezmoi) oder die venv (pip oben)
+# wirklich geaendert hat: ein Neustart bricht laufende Transkriptionen und
+# Bildgenerierungen ab, und frueher passierte er bei jedem sysup. Der Hash
+# wird erst nach erfolgreichem Neustart gespeichert, ein Fehlschlag wird also
+# beim naechsten Lauf erneut versucht.
 if [[ -f /etc/init.d/media-mcp ]] && command -v sudo >/dev/null; then
-  echo ">> media-mcp neustarten (aktualisierten Code laden)"
-  sudo rc-service media-mcp restart 2>&1 | say "neu gestartet"
-  # Hermes verbindet die media-MCP-SSE beim naechsten Chat automatisch neu
-  # (kein separater Reconnect noetig -- Odysseus, das das brauchte, ist weg).
+  _state="${XDG_CACHE_HOME:-${HOME}/.cache}/ai-update/media-mcp.sha"
+  _now="$( { cat "${AI}"/media-mcp/*.py "${AI}"/media-mcp/*.sh 2>/dev/null; "$PIP" freeze 2>/dev/null; } | sha256sum | cut -d' ' -f1)"
+  if [[ "$_now" != "$(cat "$_state" 2>/dev/null)" ]]; then
+    echo ">> media-mcp neustarten (Code oder venv geaendert)"
+    # Ausgabe selbst auswerten statt ueber say(): OpenRC meldet Fehler als
+    # " * ERROR: ..." bzw. "[ !! ]", das matcht SIGNAL nicht - say haette dann
+    # "neu gestartet" gedruckt.
+    if _out="$(sudo rc-service media-mcp restart 2>&1)"; then
+      echo "   neu gestartet"
+      mkdir -p "${_state%/*}" && echo "$_now" > "$_state"
+    else
+      echo "!! media-mcp Neustart fehlgeschlagen:"
+      tail -5 <<<"$_out" | sed 's/^[[:space:]]*/   /'
+    fi
+    # Hermes verbindet die media-MCP-SSE beim naechsten Chat automatisch neu
+    # (kein separater Reconnect noetig -- Odysseus, das das brauchte, ist weg).
+  else
+    echo ">> media-mcp: Code und venv unveraendert, kein Neustart"
+  fi
 fi
 
 # Sanity: torch muss ROCm-Build bleiben (kein GPU-Init, damit ohne render-Gruppe ok)

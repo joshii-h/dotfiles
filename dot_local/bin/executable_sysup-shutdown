@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+#
+# sysup-shutdown — wartet bis sysup komplett durch ist, dann Poweroff.
+#
+#   sysup-shutdown                # warten, dann Poweroff in +1 min (abbrechbar)
+#   sysup-shutdown --now          # warten, dann sofort ausschalten
+#   sysup-shutdown --reboot       # statt Poweroff neustarten
+#   sysup-shutdown --dry-run      # nur warten + melden, NICHT ausschalten
+#   sysup-shutdown --grace 60     # Idle-Fenster in s (default 45)
+#
+# Abbrechen:  während des Wartens -> Watcher-Prozess killen (PID in der Logzeile)
+#             nach Auslösen       -> sudo shutdown -c
+#
+# Maßgeblich ist die Lock-Datei, die sysup() für seine ganze Laufzeit anlegt
+# (Shell-PID + PIDs aller Jobs). Bei regulärem Ende verschwindet sie erst,
+# nachdem die Zusammenfassung gespeichert ist - damit fallen weder der ai-Job
+# noch eclean-kernel/grub-mkconfig am Ende der emerge-Kette durchs Raster. Wird
+# die Anzeige per Strg+C verlassen oder das Terminal geschlossen, schreibt
+# sysup die noch laufenden Job-PIDs hinein. Die Prozessnamen-Prüfung deckt
+# zusätzlich von Hand gestartete Läufe ab.
+#
+set -uo pipefail
+
+INTERVAL=10        # Poll-Abstand in s
+GRACE=45           # benötigte Idle-Dauer in s, bevor "fertig" gilt
+DELAY="+1"         # shutdown-Verzögerung
+ACTION=poweroff
+DRYRUN=0
+LOCK="${HOME}/.cache/sysup/sysup.lock"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --now)     DELAY="now" ;;
+    --reboot)  ACTION=reboot ;;
+    --dry-run) DRYRUN=1 ;;
+    --grace)   [[ "${2:-}" =~ ^[0-9]+$ ]] || { echo "--grace braucht eine Zahl (Sekunden)" >&2; exit 2; }
+               GRACE="$2"; shift ;;
+    -h|--help) sed -n '3,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Unbekannte Option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+ts() { date '+%H:%M:%S'; }
+
+# Lebt noch ein Prozess aus der Lock-Datei? Format (siehe _sysup_lock_update in
+# der .zshrc): "boot <boot_id>", dann "<pid> <starttime>". Nur gleiche Boot-ID
+# UND gleiche Startzeit zählen - ein alter Lock (Reboot, PID-Überlauf) könnte
+# sonst einen fremden Prozess treffen und ewig warten lassen.
+lock_busy() {
+  local line boot pid start stat
+  local -a f
+  [ -r "$LOCK" ] || return 1
+  boot="boot $(cat /proc/sys/kernel/random/boot_id)"
+  {
+    read -r line && [ "$line" = "$boot" ] || return 1
+    while read -r pid start; do
+      [[ "$pid" =~ ^[0-9]+$ && -n "$start" ]] || continue
+      stat=$(cat "/proc/$pid/stat" 2>/dev/null) || continue
+      stat=${stat##*) }            # comm kann Leerzeichen/Klammern enthalten
+      read -r -a f <<<"$stat"
+      [ "${f[19]:-}" = "$start" ] && return 0
+    done
+  } < "$LOCK"
+  return 1
+}
+
+# Läuft ein Prozess, dessen Befehlszeile mit Interpreter + Programm BEGINNT?
+# Ungeankerte "pgrep -f name"-Muster trafen auch jede Shell, jeden Editor und
+# jede Claude-Sitzung, deren Befehlszeile den Namen nur enthielt - der Watcher
+# wartete dann ewig.
+running() { pgrep -f "^(\S*/)?($1)( |$)" >/dev/null 2>&1; }
+
+# Gibt die aktiven sysup-Tasks aus (leer = nichts läuft mehr).
+busy_tasks() {
+  local t=()
+  lock_busy                                           && t+=(sysup)
+  pgrep -x emerge >/dev/null 2>&1                     && t+=(emerge)
+  running '\S*python\S* \S*/eclean-kernel'            && t+=(eclean-kernel)
+  running '(ba)?sh \S*/grub-mkconfig|grub-mkconfig'   && t+=(grub-mkconfig)
+  running 'flatpak upgrade'                           && t+=(flatpak)
+  running 'chezmoi update'                            && t+=(chezmoi)
+  running 'bash \S*/proton-ge-update'                 && t+=(proton-ge)
+  running 'bash \S*/ai-update\.sh'                    && t+=(ai)
+  printf '%s' "${t[*]:-}"
+}
+
+echo ":: [$(ts)] Watcher aktiv (PID $$). Poll ${INTERVAL}s, Idle-Fenster ${GRACE}s, Aktion: ${ACTION} (${DELAY})."
+
+# Läuft beim Start gar nichts, war das fast sicher ein Vertipper (Watcher vor
+# sysup gestartet) - dann nicht nach 45 s einfach ausschalten.
+if [ -z "$(busy_tasks)" ]; then
+  echo ":: [$(ts)] Kein laufendes sysup gefunden - Abbruch, kein ${ACTION}." >&2
+  exit 1
+fi
+
+idle=0
+while :; do
+  tasks="$(busy_tasks)"
+  if [ -n "$tasks" ]; then
+    idle=0
+    echo ":: [$(ts)] läuft noch: ${tasks}"
+  else
+    idle=$((idle + INTERVAL))
+    echo ":: [$(ts)] idle (${idle}/${GRACE}s)"
+    [ "$idle" -ge "$GRACE" ] && break
+  fi
+  sleep "$INTERVAL"
+done
+
+echo ":: [$(ts)] sysup ist fertig."
+
+if [ "$DRYRUN" -eq 1 ]; then
+  echo ":: --dry-run aktiv: würde jetzt ${ACTION} (${DELAY}) auslösen. Ende."
+  exit 0
+fi
+
+if [ "$ACTION" = reboot ]; then
+  echo ":: Reboot:  sudo shutdown -r ${DELAY}"
+  sudo shutdown -r "$DELAY" "sysup fertig - reboot"
+else
+  echo ":: Poweroff:  sudo shutdown -hP ${DELAY}"
+  sudo shutdown -hP "$DELAY" "sysup fertig - shutdown"
+fi
+
+[ "$DELAY" != "now" ] && echo ":: Noch abbrechbar mit:  sudo shutdown -c"

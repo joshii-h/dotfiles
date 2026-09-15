@@ -175,18 +175,19 @@ _sysup_release() {
 # Klappt auch der nicht, laeuft die Update-Kette trotzdem weiter: die
 # Quarantaene laesst den lokalen Tree unangetastet, er ist also weiter
 # benutzbar - nur eben eine Generation alt.
+# Die Ausgabe laeuft live ins Log, damit die Statuszeile waehrend des Syncs
+# nicht minutenlang stillsteht. Ein gescheiterter erster Versuch endet mit
+# einem Marker, an dem _sysup_emerge_summary dessen Fehlerzeilen verwirft.
 _sysup_sync() {
-  local out try rc
+  local try
   for try in 1 2; do
     printf ">>> Syncing repositories (Versuch %d)...\n" $try
-    out=$(command sudo emerge --sync 2>&1); rc=$?
-    if (( rc == 0 )); then
-      print -r -- "$out"
+    if command sudo emerge --sync 2>&1; then
       (( try > 1 )) && printf " * IMPORTANT: emerge --sync brauchte %d Versuche (defekter Mirror in der Rotation)\n" $try
       return 0
     fi
+    (( try < 2 )) && printf "__SYSUP_SYNC_RETRY__\n"
   done
-  print -r -- "$out"
   printf " * IMPORTANT: emerge --sync nach 2 Versuchen fehlgeschlagen - Portage-Tree bleibt eine Generation alt, @world laeuft trotzdem weiter\n"
   return 0
 }
@@ -207,7 +208,26 @@ _sysup_emerge_summary() {
         A_ver  = substr(s, RSTART + 1)
       }
     }
-    { gsub(/\033\[[0-9;]*[a-zA-Z]/, "") }
+    # Bei \r-Fortschrittszeilen zaehlt nur, was ein Terminal zuletzt zeigen wuerde.
+    { gsub(/\033\[[0-9;]*[a-zA-Z]/, ""); sub(/.*\r/, "") }
+
+    # Fehlerzeilen eines gescheiterten ersten Sync-Versuchs verwerfen - der
+    # zweite Versuch hat sie ueberholt (siehe _sysup_sync).
+    /^>>> Syncing repositories \(Versuch / { nf_mark = nf; nn_mark = nn; next }
+    /^__SYSUP_SYNC_RETRY__/ {
+      for (i = nf_mark + 1; i <= nf; i++) delete fseen[fail[i]]
+      for (i = nn_mark + 1; i <= nn; i++) delete seen[note[i]]
+      nf = nf_mark; nn = nn_mark
+      next
+    }
+
+    # Letzter Fortschrittsstand: bei einem Abbruch zeigt er, wie viel vom Plan
+    # ueberhaupt gebaut wurde (am 2026-09-15 blieben 61 von 124 Paketen liegen,
+    # der Report nannte nur das eine fehlgeschlagene).
+    /^>>> Jobs: [0-9]+ of [0-9]+ complete/ {
+      split($0, w, " "); j_done = w[3] + 0; j_total = w[5] + 0
+      next
+    }
 
     /^\[(ebuild|binary)/ {
       ci    = index($0, "]")
@@ -261,10 +281,11 @@ _sysup_emerge_summary() {
       line = $0
       if (match(line, /!!!/)) line = substr(line, RSTART)
       sub(/^ +/, "", line)
-      if (nf < 12) fail[++nf] = line
+      if (!fseen[line]++ && nf < 12) fail[++nf] = line
       next
     }
-    /^__SYSUP_RC=/ { rc = substr($0, 12) + 0 }
+    /^__SYSUP_STAGE=/ { stage = substr($0, 15); next }
+    /^__SYSUP_RC=/ { rc = substr($0, 12) + 0; rc_seen = 1 }
 
     END {
       hdr = ""
@@ -283,88 +304,216 @@ _sysup_emerge_summary() {
       if (nf) {
         printf "  \033[1;31m✗ Fehler:\033[0m\n"
         for (i = 1; i <= nf; i++) printf "    %s\n", fail[i]
-      } else if (rc != 0) {
-        printf "  \033[1;31m✗ emerge-Kette endete mit Exit-Code %d\033[0m\n", rc
+      }
+      # Nur bei Abbruch: fuer erfolgreiche Laeufe ist nicht belegt, dass die
+      # letzte Jobs-Zeile immer "N of N" lautet - keine Fehlalarme.
+      if ((rc != 0 || !rc_seen) && j_total && j_done < j_total)
+        printf "  \033[1;33m⚠ nur %d von %d geplanten Paketen gebaut, %d nicht\033[0m\n", j_done, j_total, j_total - j_done
+      if (!rc_seen && (stage != "" || j_total))
+        printf "  \033[1;31m✗ emerge-Kette nicht regulaer beendet (kein Exit-Code im Log - abgeschossen?)\033[0m\n"
+      if (rc != 0) {
+        # Die Kette bricht beim ersten Fehler ab (&&) - alles danach lief nicht.
+        if      (stage == "world")    skipped = "depclean, eclean-kernel"
+        else if (stage == "depclean") skipped = "eclean-kernel"
+        else                          skipped = ""
+        if (stage != "") printf "  \033[1;31m✗ emerge-Kette abgebrochen in Stufe %s (Exit-Code %d)\033[0m\n", stage, rc
+        else             printf "  \033[1;31m✗ emerge-Kette endete mit Exit-Code %d\033[0m\n", rc
+        if (skipped != "") printf "    übersprungen: %s\n", skipped
       }
       printf "  \033[2mvolles Log: %s\033[0m\n", logpath
     }
   ' "$log"
 }
 
+# Lock fuer sysup-shutdown: erste Zeile "boot <boot_id>", dann je Prozess
+# "<pid> <starttime>" (Feld 22 aus /proc/<pid>/stat). Nur ein Eintrag mit
+# gleicher Boot-ID UND gleicher Startzeit gilt als lebend - ~/.cache liegt auf
+# btrfs und ueberlebt Reboots, und PIDs laufen hier nach ~28 h Uptime ueber;
+# eine blosse PID in einem alten Lock koennte sonst einen fremden Prozess
+# treffen und sysup dauerhaft blockieren.
+_sysup_pidstart() {
+  [[ -r /proc/$1/stat ]] || return 1
+  local st=$(</proc/$1/stat)
+  st=${st##*\) }            # comm kann Leerzeichen/Klammern enthalten
+  print -r -- ${${=st}[20]}
+}
+
+# Schreibt die noch lebenden unter den uebergebenen PIDs in den Lock; lebt
+# keine mehr, verschwindet er. Wird mit expliziten PIDs aufgerufen, weil der
+# Funktions-EXIT-Trap erst nach dem Scope laeuft und die Locals dann weg sind.
+_sysup_lock_update() {
+  local lock=$1 p st; shift
+  local -a entries=()
+  for p; do st=$(_sysup_pidstart $p) && entries+=("$p $st"); done
+  if (( $#entries )); then
+    print -l "boot $(</proc/sys/kernel/random/boot_id)" $entries >| $lock
+  else
+    rm -f $lock
+  fi
+}
+
+# Gibt die PIDs eines Locks aus, die noch wirklich zu diesem Lauf gehoeren.
+_sysup_lock_live() {
+  local lock=$1 line
+  [[ -r $lock ]] || return 0
+  local -a l=(${(f)"$(<$lock)"}) w
+  [[ ${l[1]} == "boot $(</proc/sys/kernel/random/boot_id)" ]] || return 0
+  for line in ${l[2,-1]}; do
+    w=(${=line})
+    [[ ${w[1]} == <-> && -n ${w[2]} && $(_sysup_pidstart ${w[1]}) == ${w[2]} ]] && print ${w[1]}
+  done
+}
+
 sysup() {
   command sudo -v || return 1
-  setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
-  local -a names=(emerge flatpak dotfiles ai)
-  # Das emerge-Log bleibt liegen (angezeigt wird nur die Zusammenfassung),
-  # die letzten 10 Laeufe werden aufgehoben.
-  local logdir=$HOME/.cache/sysup
+  # NO_BG_NICE: sonst liefen flatpak/chezmoi/ai mit nice +5 (emerge regelt
+  # seine Prioritaet selbst ueber PORTAGE_NICENESS).
+  setopt LOCAL_OPTIONS LOCAL_TRAPS NO_NOTIFY NO_MONITOR NO_BG_NICE
+  local -a names=(emerge flatpak dotfiles proton-ge ai)
+  # Das emerge-Log und die komplette Zusammenfassung bleiben liegen (je die
+  # letzten 10 Laeufe): nach sysup-shutdown ist das Terminal weg, ohne
+  # gespeicherte Zusammenfassung blieben Fehler von flatpak/ai/proton unsichtbar.
+  local logdir=$HOME/.cache/sysup stamp=$(date +%Y%m%d-%H%M%S)
   mkdir -p $logdir
-  local -a logs=($logdir/emerge-$(date +%Y%m%d-%H%M%S).log) pids
-  for n in ${names[2,-1]}; do logs+=($(mktemp)); done
-  local start=$SECONDS
-  # eclean-kernel laeuft am Ende der emerge-Kette, weil emerge zuvor evtl. einen
-  # neuen Kernel installiert hat. -n 3 = die 3 neuesten behalten; der laufende
-  # Kernel wird immer geschuetzt, und ohne -d bleibt alles unangetastet, was
-  # GRUB referenziert. Raeumt auch /lib/modules + regeneriert grub.cfg.
-  { _sysup_sync && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world && command sudo emerge --depclean && command sudo eclean-kernel -n 3; echo "__SYSUP_RC=$?"; } &>"${logs[1]}" &
-  pids+=($!)
-  setsid flatpak upgrade -y &>"${logs[2]}" &
-  pids+=($!)
-  chezmoi update --no-tty &>"${logs[3]}" &
-  local dotfiles_pid=$!
-  pids+=($dotfiles_pid)
-  # ai: wait for the dotfiles job (so the freshly-synced ai scripts + Odysseus
-  # patch are in place), then run the local AI-stack updater.
-  { while kill -0 $dotfiles_pid 2>/dev/null; do sleep 1; done; ~/ai/ai-update.sh; } &>"${logs[4]}" &
-  pids+=($!)
-  local lines=$(( ${#names} + 2 ))
-  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 drawn=0
-  tput civis 2>/dev/null
-  trap 'tput cnorm 2>/dev/null' INT TERM
-  while true; do
-    local all_done=1
-    for j in {1..${#pids}}; do
-      kill -0 ${pids[$j]} 2>/dev/null && all_done=0 && break
-    done
-    (( all_done )) && break
-    (( drawn )) && printf "\033[${lines}A"
-    local elapsed=$((SECONDS - start))
-    local maxw=$(( COLUMNS - 16 ))
-    local s=${spin:$((i%${#spin})):1}
-    printf "\033[K\n"
-    printf "\033[K  \033[1;33m%s\033[0m  \033[1msysup\033[0m  \033[2m%dm%02ds\033[0m\n" \
-      "$s" $((elapsed/60)) $((elapsed%60))
-    for j in {1..${#pids}}; do
-      local last=$(tail -1 "${logs[$j]}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r')
-      if kill -0 ${pids[$j]} 2>/dev/null; then
-        printf "\033[K  \033[33m●\033[0m  %-9s \033[2m%s\033[0m\n" "${names[$j]}" "${${last:-(starting...)}:0:$maxw}"
-      else
-        printf "\033[K  \033[32m✓\033[0m  %-9s \033[2mdone\033[0m\n" "${names[$j]}"
-      fi
-    done
-    printf "\033[K"
-    drawn=1; ((i++)); sleep 0.5
-  done
-  tput cnorm 2>/dev/null
-  trap - INT TERM
-  if (( drawn )); then
-    printf "\033[${lines}A"
-    for _ in {1..$lines}; do printf "\033[K\n"; done
-    printf "\033[${lines}A"
+  # Die Job-Logs liegen neben dem emerge-Log (nicht in mktemp): wird die
+  # Anzeige verlassen, bleiben sie so fuer die Fehlersuche erhalten.
+  local -a logs=($logdir/emerge-$stamp.log) pids
+  for n in ${names[2,-1]}; do logs+=($logdir/$n-$stamp.log); done
+  local summary=$logdir/summary-$stamp.txt start=$SECONDS
+  # Lock fuer sysup-shutdown: Shell-PID + PIDs aller Jobs. Bei regulaerem Ende
+  # verschwindet er erst nach der gespeicherten Zusammenfassung.
+  local lock=$logdir/sysup.lock
+  # Laeuft schon ein sysup - auch ein verlassener, dessen Jobs noch arbeiten?
+  # Dann dessen Lock nicht ueberschreiben: sein EXIT-Trap haelt unsere PIDs fuer
+  # tot und wuerde unseren Lock spaeter loeschen.
+  local -a live=($(_sysup_lock_live $lock))
+  if (( $#live )); then
+    print -P "%F{red}✗ sysup laeuft bereits%f (PIDs: $live) - Lock: $lock"
+    return 1
   fi
-  wait
-  for j in {1..${#names}}; do
-    printf "\n\033[1;36m--- %s ---\033[0m\n" "${names[$j]}"
-    if [[ "${names[$j]}" == emerge ]]; then
-      _sysup_emerge_summary "${logs[$j]}"
-    else
-      cat "${logs[$j]}"
+  _sysup_lock_update $lock $$
+  trap "_sysup_lock_update ${(q)lock}" EXIT
+  # Strg+C/TERM verlassen nur die Anzeige, die Jobs laufen weiter; gezielt
+  # abbrechen nur per "sudo kill" (emerge nie mitten im Merge - das hat am
+  # 2026-09-15 einen Portage-Deadlock ausgeloest). Ohne eigenen Trap bricht zsh
+  # die Funktion ab, ohne den EXIT-Trap auszufuehren, und der Lock bliebe mit
+  # lebender Shell-PID stehen. Der Trap setzt nur ein Flag, das die Schleife
+  # jeden Takt prueft: ein return direkt im Trap ging verloren, wenn das Signal
+  # waehrend einer $(…)-Substitution kam. Der always-Block gibt den Lock auch
+  # nach fatalen Fehlern frei (dort ueberspringt zsh den EXIT-Trap); der
+  # EXIT-Trap selbst bleibt fuer SIGHUP beim Schliessen des Terminals.
+  local interrupted=0
+  trap 'interrupted=1' INT TERM
+  {
+    # Alle Jobs laufen per setsid in einer eigenen Session (sonst bekaeme emerge
+    # beim Schliessen des Terminals das SIGHUP und braeche mitten im Merge ab)
+    # und werden mit &! sofort disowned: nach Strg+C ist MONITOR wieder an, und
+    # zsh schickt beim exit/Schliessen jedem Job seiner Jobtabelle gezielt ein
+    # SIGHUP - dagegen hilft setsid allein nicht.
+    # Die emerge-Kette laeuft dafuer in einer frischen zsh, die _sysup_sync als
+    # Definition mitbekommt; die __SYSUP_STAGE-Marker sagen der Zusammenfassung,
+    # an welcher Stufe die Kette abbrach. --with-bdeps/--changed-deps stehen
+    # auch in EMERGE_DEFAULT_OPTS, bleiben hier aber explizit, damit sysup nicht
+    # still von make.conf abhaengt.
+    # eclean-kernel laeuft am Ende der emerge-Kette, weil emerge zuvor evtl. einen
+    # neuen Kernel installiert hat. -n 3 = die 3 neuesten behalten; der laufende
+    # Kernel wird immer geschuetzt, und ohne -d bleibt alles unangetastet, was
+    # GRUB referenziert. Raeumt auch /lib/modules + regeneriert grub.cfg.
+    setsid zsh -fc "$(functions _sysup_sync)"'
+      _sysup_sync \
+        && echo __SYSUP_STAGE=world         && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world \
+        && echo __SYSUP_STAGE=depclean      && command sudo emerge --depclean \
+        && echo __SYSUP_STAGE=eclean-kernel && command sudo eclean-kernel -n 3
+      echo "__SYSUP_RC=$?"' &>"${logs[1]}" &!
+    local emerge_pid=$!
+    pids+=($emerge_pid)
+    setsid flatpak upgrade -y &>"${logs[2]}" &!
+    pids+=($!)
+    setsid chezmoi update --no-tty &>"${logs[3]}" &!
+    local dotfiles_pid=$!
+    pids+=($dotfiles_pid)
+    setsid $HOME/.local/bin/proton-ge-update &>"${logs[4]}" &!
+    pids+=($!)
+    # ai wartet auf dotfiles (frisch synchronisierte ai-Skripte + Hermes-Patch)
+    # und auf die emerge-Kette, die evtl. gerade ROCm- oder Python-Libs
+    # austauscht, gegen die pip baut und media-mcp neu startet.
+    setsid zsh -fc 'print "wartet auf emerge + dotfiles ..."
+      while kill -0 $1 2>/dev/null || kill -0 $2 2>/dev/null; do sleep 2; done
+      exec $HOME/ai/ai-update.sh' _ $emerge_pid $dotfiles_pid &>"${logs[5]}" &!
+    pids+=($!)
+    _sysup_lock_update $lock $$ $pids
+    trap "_sysup_lock_update ${(q)lock} $pids" EXIT
+    local lines=$(( ${#names} + 2 ))
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 drawn=0
+    tput civis 2>/dev/null
+    while true; do
+      local all_done=1
+      for j in {1..${#pids}}; do
+        kill -0 ${pids[$j]} 2>/dev/null && all_done=0 && break
+      done
+      (( all_done || interrupted )) && break
+      (( drawn )) && printf "\033[${lines}A"
+      local elapsed=$((SECONDS - start))
+      # COLUMNS kann 0 sein (Shell ohne TTY): eine zu negative Laenge in
+      # ${…:0:$maxw} ist ein fataler Expansionsfehler, der die Funktion ohne
+      # EXIT-Trap abbricht - der Lock bliebe mit lebender Shell-PID stehen.
+      local maxw=$(( ${COLUMNS:-80} - 16 )); (( maxw < 20 )) && maxw=20
+      local s=${spin:$((i%${#spin})):1}
+      printf "\033[K\n"
+      printf "\033[K  \033[1;33m%s\033[0m  \033[1msysup\033[0m  \033[2m%dm%02ds\033[0m\n" \
+        "$s" $((elapsed/60)) $((elapsed%60))
+      for j in {1..${#pids}}; do
+        local last=$(tail -1 "${logs[$j]}" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r')
+        if kill -0 ${pids[$j]} 2>/dev/null; then
+          printf "\033[K  \033[33m●\033[0m  %-9s \033[2m%s\033[0m\n" "${names[$j]}" "${${last:-(starting...)}:0:$maxw}"
+        else
+          printf "\033[K  \033[32m✓\033[0m  %-9s \033[2mdone\033[0m\n" "${names[$j]}"
+        fi
+      done
+      printf "\033[K"
+      drawn=1; ((i++)); sleep 0.5
+      (( interrupted )) && break
+    done
+    tput cnorm 2>/dev/null
+    if (( drawn )); then
+      printf "\033[${lines}A"
+      for _ in {1..$lines}; do printf "\033[K\n"; done
+      printf "\033[${lines}A"
     fi
-  done
-  rm -f ${logs[2,-1]}
-  local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) )
-  (( $#stale )) && rm -f $stale
-  printf "\n\033[1;32m✓ Done in %ds\033[0m\n" "$((SECONDS - start))"
+    # Jobs koennen waehrend des letzten Takts fertig geworden sein - dann ist
+    # die Zusammenfassung trotz Strg+C faellig.
+    local alive_jobs=0
+    for j in {1..${#pids}}; do kill -0 ${pids[$j]} 2>/dev/null && alive_jobs=1; done
+    if (( interrupted && alive_jobs )); then
+      print -P "%F{yellow}sysup-Anzeige verlassen%f - Jobs laufen im Hintergrund weiter, Logs: ~/.cache/sysup/"
+      return 130
+    fi
+    interrupted=0
+    for j in {1..${#names}}; do
+      printf "\n\033[1;36m--- %s ---\033[0m\n" "${names[$j]}"
+      if [[ "${names[$j]}" == emerge ]]; then
+        _sysup_emerge_summary "${logs[$j]}"
+      else
+        cat "${logs[$j]}"
+      fi
+    done | tee $summary
+    if (( interrupted )); then
+      rm -f $summary   # ein Torso saehe aus wie ein echter Report
+      print -P "\n%F{yellow}Zusammenfassung abgebrochen%f - Job-Logs bleiben in ~/.cache/sysup/"
+      return 130
+    fi
+    # Die Job-Logs stecken jetzt in der Zusammenfassung; Reste verlassener Laeufe
+    # nach einem Tag weg.
+    rm -f ${logs[2,-1]}
+    local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) $logdir/summary-*.txt(Nom[11,-1])
+                     $logdir/(flatpak|dotfiles|proton-ge|ai)-*.log(Nmh+24) )
+    (( $#stale )) && rm -f $stale
+    printf "\n\033[1;32m✓ Done in %ds\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$((SECONDS - start))" "$summary"
+  } always {
+    _sysup_lock_update $lock $pids
+    tput cnorm 2>/dev/null
+    trap - EXIT   # Lock ist geschrieben; der EXIT-Trap war nur fuer SIGHUP im Rumpf
+  }
 }
 {{- end }}
 

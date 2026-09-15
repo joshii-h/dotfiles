@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Live-Monitor für einen laufenden emerge-Lauf, der nach Logfile schreibt.
+# Usage: emerge-mon [logfile]   (default: neuestes ~/.cache/sysup/emerge-*.log)
+set -u
+LOG="${1:-$(ls -t "$HOME"/.cache/sysup/emerge-*.log 2>/dev/null | head -1)}"
+[[ -n $LOG ]] || { echo "Kein sysup-Log in ~/.cache/sysup gefunden - Logfile als Argument angeben."; exit 1; }
+INT="${EMERGE_MON_INTERVAL:-2}"
+
+c_reset=$'\e[0m'; c_dim=$'\e[2m'; c_b=$'\e[1m'
+c_grn=$'\e[32m'; c_yel=$'\e[33m'; c_red=$'\e[31m'; c_cyn=$'\e[36m'
+hide=$'\e[?25l'; show=$'\e[?25h'
+
+cleanup(){ printf '%s' "$show"; exit 0; }
+trap cleanup INT TERM
+
+bar(){ # $1 done  $2 total  $3 width
+  local d=$1 t=$2 w=$3 fill
+  (( t > 0 )) || t=1
+  fill=$(( d * w / t ))
+  (( fill > w )) && fill=$w
+  printf '['
+  printf '%*s' "$fill" '' | tr ' ' '#'
+  printf '%*s' "$(( w - fill ))" '' | tr ' ' '-'
+  printf ']'
+}
+
+printf '%s' "$hide"
+miss=1   # beim Start ohne emerge sofort "beendet" zeigen, nicht erst nach 2 Runden
+while true; do
+  if [[ ! -f $LOG ]]; then
+    clear; echo "${c_red}Logfile nicht gefunden:${c_reset} $LOG"; sleep "$INT"; continue
+  fi
+
+  # emerge noch aktiv? Prozessname statt Befehlszeile: "pgrep -f 'emerge .*@world'"
+  # traf auch den zsh-Wrapper der sysup-Kette und meldete dann in der
+  # eclean-kernel-Phase weiter "läuft".
+  if pgrep -x emerge >/dev/null 2>&1; then
+    alive=1; miss=0
+  else
+    # erst nach 2 Fehlversuchen wirklich "beendet" melden (gegen Transient-Misses)
+    miss=$(( ${miss:-0} + 1 ))
+    (( miss >= 2 )) && alive=0 || alive=1
+  fi
+
+  # Zahlen aus dem Log ziehen
+  jobs_line=$(grep -aE '>>> Jobs: [0-9]+ of [0-9]+ complete' "$LOG" | tail -1)
+  done=$(sed -nE 's/.*Jobs: ([0-9]+) of [0-9]+ complete.*/\1/p' <<<"$jobs_line")
+  total=$(sed -nE 's/.*Jobs: [0-9]+ of ([0-9]+) complete.*/\1/p' <<<"$jobs_line")
+  running=$(sed -nE 's/.*complete, ([0-9]+) running.*/\1/p' <<<"$jobs_line")
+  load=$(sed -nE 's/.*Load avg: (.*)$/\1/p' <<<"$jobs_line")
+  : "${done:=0}" "${total:=0}" "${running:=0}" "${load:=?}"
+
+  # gerade laufende Pakete
+  current=$(grep -aE '>>> Emerging \([0-9]+ of [0-9]+\)' "$LOG" | tail -3 \
+            | sed -E 's/.*\(([0-9]+) of ([0-9]+)\) /\1\/\2  /')
+
+  # Fehler
+  fails=$(grep -aiE 'Failed to emerge|!!! error|ERROR: .* failed' "$LOG" | tail -3)
+
+  # Laufzeit anhand Logfile-Alter
+  start_epoch=$(stat -c %Y "$LOG" 2>/dev/null)
+  now=$(date +%s)
+  # mtime ist letzte Schreibzeit; Startzeit grob über erste Zeile nicht verfügbar → nutze Dateigeburt falls vorhanden
+  birth=$(stat -c %W "$LOG" 2>/dev/null)
+  [[ $birth =~ ^[0-9]+$ && $birth -gt 0 ]] && start_epoch=$birth
+  el=$(( now - start_epoch )); (( el < 0 )) && el=0
+  elapsed=$(printf '%dh%02dm%02ds' $((el/3600)) $(((el%3600)/60)) $((el%60)))
+
+  pct=0; (( total > 0 )) && pct=$(( done * 100 / total ))
+
+  clear
+  printf '%s┌─ %semerge-Monitor%s %s── %s ──%s\n' "$c_cyn" "$c_b" "$c_reset$c_cyn" "$c_dim" "$LOG" "$c_reset"
+  if (( alive )); then
+    printf '%s│%s  Status: %s● läuft%s   Laufzeit: %s%s%s   Load: %s%s%s\n' \
+      "$c_cyn" "$c_reset" "$c_grn" "$c_reset" "$c_b" "$elapsed" "$c_reset" "$c_dim" "$load" "$c_reset"
+  else
+    printf '%s│%s  Status: %s■ beendet%s   Laufzeit: %s%s%s\n' \
+      "$c_cyn" "$c_reset" "$c_yel" "$c_reset" "$c_b" "$elapsed" "$c_reset"
+  fi
+  printf '%s│%s  Fortschritt: %s%d / %d%s  (%s%d%%%s)   parallel: %s\n' \
+    "$c_cyn" "$c_reset" "$c_b" "$done" "$total" "$c_reset" "$c_grn" "$pct" "$c_reset" "$running"
+  printf '%s│%s  %s%s%s %d%%\n' "$c_cyn" "$c_reset" "$c_grn" "$(bar "$done" "$total" 40)" "$c_reset" "$pct"
+  printf '%s│%s\n' "$c_cyn" "$c_reset"
+  printf '%s│%s  %sZuletzt/aktuell:%s\n' "$c_cyn" "$c_reset" "$c_b" "$c_reset"
+  if [[ -n $current ]]; then
+    while IFS= read -r line; do
+      printf '%s│%s    %s%s%s\n' "$c_cyn" "$c_reset" "$c_dim" "$line" "$c_reset"
+    done <<<"$current"
+  fi
+  if [[ -n $fails ]]; then
+    printf '%s│%s\n' "$c_cyn" "$c_reset"
+    printf '%s│%s  %s%sFEHLER:%s\n' "$c_cyn" "$c_reset" "$c_b" "$c_red" "$c_reset"
+    while IFS= read -r line; do
+      printf '%s│%s    %s%s%s\n' "$c_cyn" "$c_reset" "$c_red" "${line:0:90}" "$c_reset"
+    done <<<"$fails"
+  fi
+  printf '%s└─%s %sStrg+C zum Beenden · Refresh %ss%s\n' "$c_cyn" "$c_reset" "$c_dim" "$INT" "$c_reset"
+
+  (( alive )) || { sleep "$INT"; }   # nach Ende noch laufen lassen für Endstand
+  sleep "$INT"
+done

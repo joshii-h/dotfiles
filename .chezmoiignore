@@ -2,6 +2,12 @@ README.md
 LICENSE
 msteams-pwa-handler/**
 
+# sysup-Helfer sind Gentoo-spezifisch (emerge, eclean-kernel, grub-mkconfig).
+{{- if ne .distro "gentoo" }}
+.local/bin/sysup-shutdown
+.local/bin/emerge-mon
+{{- end }}
+
 # AI-Stack: nur die Skripte/Configs versionieren, nicht die schweren
 # Laufzeit-/Modell-/Clone-Verzeichnisse und generierten Artefakte.
 ai/venv/**
