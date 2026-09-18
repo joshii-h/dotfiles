@@ -1,0 +1,53 @@
+#!/bin/bash
+# plasmashell-watchdog — startet plasmashell nach einem Absturz neu.
+#
+# Unter systemd erledigt das plasma-plasmashell.service (Restart=on-failure).
+# Unter OpenRC startet plasma_session plasmashell genau einmal, ohne Neustart.
+# Gestartet via ~/.config/autostart/plasmashell-watchdog.desktop.
+set -u
+
+LOG="${XDG_STATE_HOME:-$HOME/.local/state}/plasmashell.log"
+mkdir -p "${LOG%/*}"
+
+# nur eine Instanz pro Session
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/plasmashell-watchdog.lock"
+flock -n 9 || exit 0
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
+session_alive() { pgrep -u "$UID" -x ksmserver >/dev/null && pgrep -u "$UID" -x kwin_wayland >/dev/null; }
+shell_pid() { pgrep -u "$UID" -xo plasmashell; }
+
+# Beim Login erst abwarten, bis plasma_session plasmashell hochgezogen hat
+for _ in {1..30}; do
+    [[ -n $(shell_pid) ]] && break
+    sleep 1
+done
+
+restarts=()
+while session_alive; do
+    pid=$(shell_pid)
+    if [[ -n $pid ]]; then
+        tail --pid="$pid" -f /dev/null   # blockiert, bis der Prozess endet
+        sleep 3                          # Logout oder `plasmashell --replace` Zeit geben
+        continue
+    fi
+    session_alive || break               # Logout: nichts neu starten
+
+    # Crash-Loop-Bremse: max. 3 Neustarts in 2 Minuten
+    now=$(date +%s)
+    recent=()
+    for t in "${restarts[@]}"; do (( now - t < 120 )) && recent+=("$t"); done
+    restarts=("${recent[@]}")
+    if (( ${#restarts[@]} >= 3 )); then
+        log "3 Neustarts in 2 Minuten – Watchdog gibt auf"
+        notify-send -u critical -i plasmashell "plasmashell" \
+            "Stürzt wiederholt ab – Watchdog gibt auf. Log: $LOG"
+        exit 1
+    fi
+    restarts+=("$now")
+
+    log "plasmashell ist weg – starte neu"
+    setsid plasmashell >>"$LOG" 2>&1 </dev/null &
+    notify-send -i plasmashell "plasmashell" "War abgestürzt und wurde neu gestartet."
+    sleep 5
+done

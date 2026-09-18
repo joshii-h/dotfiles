@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=plasmashell Watchdog
+Comment=Startet plasmashell nach einem Absturz neu (kein systemd)
+Exec=/home/joshii/.local/bin/plasmashell-watchdog
+Terminal=false
+X-KDE-autostart-phase=2

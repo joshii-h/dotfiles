@@ -8,6 +8,13 @@ msteams-pwa-handler/**
 .local/bin/emerge-mon
 {{- end }}
 
+# plasmashell-Watchdog nur ohne systemd noetig (dort macht es
+# plasma-plasmashell.service mit Restart=on-failure).
+{{- if ne .distro "gentoo" }}
+.local/bin/plasmashell-watchdog
+.config/autostart/plasmashell-watchdog.desktop
+{{- end }}
+
 # AI-Stack: nur die Skripte/Configs versionieren, nicht die schweren
 # Laufzeit-/Modell-/Clone-Verzeichnisse und generierten Artefakte.
 ai/venv/**
