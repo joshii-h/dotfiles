@@ -113,6 +113,93 @@ _sysup_pkg_summary() {
   printf "  \033[2mvolles Log: %s\033[0m\n" "$log"
 }
 
+# VirtualBox (RPM Fusion) nachziehen, nachdem dnf evtl. eine neue Version
+# gebracht hat: RPM Fusion liefert weder das Guest-Additions-ISO noch das
+# Extension Pack, beides kommt von Oracle (SHA256 gegen SHA256SUMS geprüft).
+# Das ISO liegt unter /usr/share/virtualbox/VBoxGuestAdditions.iso, dem Pfad,
+# den VirtualBox für "Gasterweiterungen einlegen" nimmt (Symlink auf die
+# versionierte Datei). Das Extension Pack wird nur aktualisiert, wenn es schon
+# installiert ist und keine VM läuft. Berichtszeilen beginnen mit zwei
+# Leerzeichen, alles andere ist nur Fortschritt für die Statuszeile.
+_sysup_vbox() {
+  local ver=$(VBoxManage --version 2>/dev/null) dir=/usr/share/virtualbox changed=0
+  ver=${ver%%[_r]*}
+  if [[ $ver != <->.<->.<-> ]]; then
+    print "  \033[1;31m✗ VirtualBox-Version nicht lesbar\033[0m"; return 1
+  fi
+  local base=https://download.virtualbox.org/virtualbox/$ver tmp=$(mktemp -d) sums
+  print "… lade SHA256SUMS für $ver"
+  if ! sums=$(curl -sfL $base/SHA256SUMS); then
+    print "  \033[1;31m✗ SHA256SUMS für VirtualBox $ver nicht ladbar\033[0m"; rm -rf $tmp; return 1
+  fi
+  _sysup_vbox_dl() {
+    print "… lade $1"
+    curl -sfL -o $tmp/$1 $base/$1 \
+      && [[ $(sha256sum <$tmp/$1) == "$(awk -v f="*$1" '$2 == f { print $1; exit }' <<<$sums)  -" ]]
+  }
+
+  local cur=$(readlink $dir/VBoxGuestAdditions.iso 2>/dev/null)
+  cur=${${cur:t}#VBoxGuestAdditions_}; cur=${cur%.iso}
+  if [[ $cur != $ver ]]; then
+    changed=1
+    if _sysup_vbox_dl VBoxGuestAdditions_$ver.iso \
+       && command sudo install -Dm644 $tmp/VBoxGuestAdditions_$ver.iso $dir/VBoxGuestAdditions_$ver.iso \
+       && command sudo ln -sfn VBoxGuestAdditions_$ver.iso $dir/VBoxGuestAdditions.iso; then
+      local f
+      for f in $dir/VBoxGuestAdditions_*.iso(N); do
+        [[ $f != */VBoxGuestAdditions_$ver.iso ]] && command sudo rm -f $f
+      done
+      printf "    \033[36m↑\033[0m %-42s \033[2m%s\033[0m\n" "Guest-Additions-ISO" "${cur:-(keins)} → $ver"
+    else
+      print "  \033[1;31m✗ Guest-Additions-ISO $ver: Download, Prüfsumme oder Installation fehlgeschlagen\033[0m"
+    fi
+  fi
+
+  # Version aus der installierten ExtPack.xml, nicht per "list extpacks": ein
+  # noch laufendes VBoxSVC des Users meldet nach dem Update die alte Version.
+  local ep=$(sed -n 's/.*<Version[^>]*>\([0-9.]*\)<.*/\1/p' \
+    /usr/lib64/virtualbox/ExtensionPacks/Oracle_VirtualBox_Extension_Pack/ExtPack.xml 2>/dev/null)
+  if [[ -n $ep && $ep != $ver ]]; then
+    changed=1
+    local epf=Oracle_VirtualBox_Extension_Pack-$ver.vbox-extpack
+    if [[ -n $(VBoxManage list runningvms 2>/dev/null) ]]; then
+      print "  \033[33m!\033[0m Extension Pack $ep ≠ $ver übersprungen – eine VM läuft (VMs beenden, sysup erneut starten)"
+    elif _sysup_vbox_dl $epf && yes | command sudo VBoxManage extpack install --replace $tmp/$epf &>/dev/null; then
+      printf "    \033[36m↑\033[0m %-42s \033[2m%s\033[0m\n" "Extension Pack" "$ep → $ver"
+    else
+      print "  \033[1;31m✗ Extension Pack $ver: Download, Prüfsumme oder Installation fehlgeschlagen\033[0m"
+    fi
+  fi
+  rm -rf $tmp
+  unfunction _sysup_vbox_dl
+
+  # Neues akmod-Modul wird erst nach Neustart (oder vboxdrv-Neustart) geladen.
+  local mod=$(</sys/module/vboxdrv/version 2>/dev/null)
+  if [[ -n $mod && ${mod%%[_ r]*} != $ver ]]; then
+    changed=1
+    print "  \033[33m!\033[0m geladenes vboxdrv ${mod%%[_ r]*} ≠ $ver – Neustart nötig (oder bei beendeten VMs: sudo akmods && sudo systemctl restart vboxdrv)"
+  fi
+
+  # Guest Additions je VM: VirtualBox merkt sich die zuletzt gemeldete Version
+  # als Gast-Eigenschaft, auch über das Ausschalten hinaus. Aktualisieren geht
+  # nur im Gast (guestcontrol updatega bräuchte Zugangsdaten); hängt das ISO
+  # schon im Laufwerk, reicht dort VBoxWindowsAdditions.exe bzw. VBoxLinuxAdditions.run.
+  local line name gv
+  VBoxManage list vms 2>/dev/null | while read -r line; do
+    name=${line% \{*}; name=${${name#\"}%\"}
+    gv=$(VBoxManage guestproperty get "$name" /VirtualBox/GuestAdd/Version 2>/dev/null)
+    gv=${gv#Value: }
+    [[ $gv == <->.<->.<-> && $gv != $ver ]] || continue
+    if VBoxManage showvminfo "$name" --machinereadable 2>/dev/null | grep -q '"/usr/share/virtualbox/VBoxGuestAdditions.iso"$'; then
+      print "  \033[33m!\033[0m $name: Guest Additions $gv → $ver fällig – ISO liegt im Laufwerk, im Gast den Installer starten"
+    else
+      print "  \033[33m!\033[0m $name: Guest Additions $gv → $ver fällig – im Gast über Geräte → Gasterweiterungen einlegen"
+    fi
+  done | grep . && changed=1
+  (( changed )) || print "  \033[2mVirtualBox $ver – ISO, Extension Pack und Gäste aktuell\033[0m"
+  return 0
+}
+
 sysup() {
   if [[ "$1" == "-r" || "$1" == "--release" ]]; then
     _sysup_release "$2"
@@ -124,6 +211,7 @@ sysup() {
   ssh-add -l &>/dev/null || { ssh-add ~/.ssh/id_ed25519 || return 1; }
   setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
   local -a names=(dnf flatpak rustup deno npm dotfiles noson claude)
+  (( $+commands[VBoxManage] )) && names+=(vbox)
   # Logs der Paket-Jobs und die Zusammenfassung bleiben liegen (je die letzten
   # 10 Läufe), der Rest steckt danach in der Zusammenfassung.
   local logdir=$HOME/.cache/sysup stamp=$(date +%Y%m%d-%H%M%S)
@@ -139,6 +227,7 @@ sysup() {
     _sysup_snap_rpm >$snap/dnf.after
     print "__SYSUP_RC=$rc"
   } &>"${logs[1]}" &
+  local dnf_pid=$!
   pids+=($!)
   {
     _sysup_snap_flatpak >$snap/flatpak.before
@@ -177,6 +266,15 @@ sysup() {
     print "__SYSUP_RC=$rc"
   } &>"${logs[8]}" &
   pids+=($!)
+  # vbox wartet auf dnf, das evtl. gerade VirtualBox selbst aktualisiert.
+  if (( ${#names} >= 9 )); then
+    {
+      print "wartet auf dnf ..."
+      while kill -0 $dnf_pid 2>/dev/null; do sleep 2; done
+      _sysup_vbox
+    } &>"${logs[9]}" &
+    pids+=($!)
+  fi
   local lines=$(( ${#names} + 2 ))
   local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 drawn=0
   tput civis 2>/dev/null
@@ -218,6 +316,7 @@ sysup() {
     case ${names[$j]} in
       dnf|flatpak|claude)
         _sysup_pkg_summary "${logs[$j]}" $snap/${names[$j]}.before $snap/${names[$j]}.after ;;
+      vbox) grep -a '^  ' "${logs[$j]}" || cat "${logs[$j]}" ;;
       *) cat "${logs[$j]}" ;;
     esac
     if [[ ${names[$j]} == dnf ]]; then
@@ -226,7 +325,7 @@ sysup() {
         && printf "  \033[33m!\033[0m Neustart nötig: Kernel %s installiert, %s läuft\n" "${newest#kernel-core-}" "$(uname -r)"
     fi
   done | tee $summary
-  rm -rf $snap ${logs[3,7]}
+  rm -rf $snap ${logs[3,7]} ${logs[9,-1]}
   local -a stale
   for n in dnf flatpak claude summary; do stale+=( $logdir/$n-*(Nom[11,-1]) ); done
   (( $#stale )) && rm -f $stale
