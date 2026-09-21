@@ -95,18 +95,30 @@ _sysup_pkg_summary() {
     { gsub(/\033\[[0-9;]*[a-zA-Z]/, ""); sub(/.*\r/, "") }
     /^__SYSUP_RC=/ { rc = substr($0, 12) + 0; rc_seen = 1; next }
     NF { tl[++nt % 8] = $0 }
-    /^(Error|error|Problem|Skipping|Failed|Warning|warning|Warnung|Fehler|E:|W:)|end-of-life/ {
+    # dnf5 "Skipping packages with …:" + Tabelle: nur die Paketnamen sammeln.
+    /^Skipping packages with / {
+      why = $0; sub(/^Skipping packages with /, "", why); sub(/:$/, "", why)
+      if (why == "conflicts") why = "Konflikt"; else if (why == "broken dependencies") why = "unerfüllte Abhängigkeit"
+      skipping = 1; next
+    }
+    skipping && /^ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+/ { k = $1 " (" why ")"; if (!sseen[k]++) skip[++ns] = k; next }
+    { skipping = 0 }
+    # Problem-Blöcke erklären übersprungene Pakete ausführlich - nur bei einem
+    # echten Fehlschlag zeigen, sonst genügt die Liste oben.
+    /^Problem/ { inprob = 1; if (npr < 12) pr[++npr] = $0; next }
+    inprob && /^ +- / { if (npr < 12) pr[++npr] = "  " $0; next }
+    { inprob = 0 }
+    /^(Error|error|Failed|Warning|warning|Warnung|Fehler|E:|W:)|end-of-life/ {
       if (!seen[$0]++ && np < 12) p[++np] = $0
-      inprob = /^(Problem|Skipping)/
       next
     }
-    inprob && /^ +[-a-zA-Z0-9]/ { if (np < 12) p[++np] = "  " $0; next }
-    { inprob = 0 }
     END {
+      for (i = 1; i <= ns; i++) printf "  \033[33m⚠ Update übersprungen:\033[0m %s\n", skip[i]
       for (i = 1; i <= np; i++) printf "  \033[33m!\033[0m %s\n", p[i]
+      if (rc || !rc_seen) for (i = 1; i <= npr; i++) printf "  \033[33m!\033[0m %s\n", pr[i]
       if (!rc_seen) printf "  \033[1;31m✗ nicht regulär beendet (kein Exit-Code im Log)\033[0m\n"
       else if (rc) printf "  \033[1;31m✗ Exit-Code %d\033[0m\n", rc
-      if ((rc || !rc_seen) && !np)
+      if ((rc || !rc_seen) && !np && !npr)
         for (i = nt - 7; i <= nt; i++) if (i > 0) printf "    \033[2m%s\033[0m\n", tl[i % 8]
     }
   ' "$log"
@@ -222,7 +234,10 @@ sysup() {
   local start=$SECONDS
   {
     _sysup_snap_rpm >$snap/dnf.before
-    command sudo dnf up -y
+    # --no-best: hängt ein Paket an einem nachhinkenden Repo (z.B. libheif an
+    # libheif-freeworld aus RPM Fusion), bleibt nur dieses stehen, statt dass
+    # dnf die ganze Transaktion verwirft (2026-09-21: 146 Updates blockiert).
+    command sudo dnf up -y --no-best
     rc=$?
     _sysup_snap_rpm >$snap/dnf.after
     print "__SYSUP_RC=$rc"
