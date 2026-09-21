@@ -8,6 +8,12 @@ msteams-pwa-handler/**
 .local/bin/emerge-mon
 {{- end }}
 
+# AI-Stack (ROCm, Hermes) und Proton-GE laufen nur im Gentoo-sysup.
+{{- if ne .distro "gentoo" }}
+ai/**
+.local/bin/proton-ge-update
+{{- end }}
+
 # plasmashell-Watchdog nur ohne systemd noetig (dort macht es
 # plasma-plasmashell.service mit Restart=on-failure).
 {{- if ne .distro "gentoo" }}
