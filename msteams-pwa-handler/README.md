@@ -5,14 +5,14 @@
 
 Wenn du Teams nur als Progressive Web App nutzt, registriert nichts das `msteams://`-Schema
 — Links aus Outlook, Kalender-Einladungen, anderen Apps laufen dann ins Leere. Dieses kleine
-Werkzeug schließt die Lücke: Es schreibt `msteams:/l/…` nach `https://teams.microsoft.com/l/…`
+Werkzeug schließt die Lücke: Es schreibt `msteams:/l/…` nach `https://teams.cloud.microsoft/l/…`
 um und öffnet das im PWA-Fenster.
 
 ## Voraussetzungen
 
 - Linux mit einer freedesktop-Umgebung (`xdg-mime`, `xdg-utils`)
 - [`firefoxpwa`](https://github.com/filips123/PWAsForFirefox)
-- Microsoft Teams als firefoxpwa-PWA installiert (`https://teams.microsoft.com`)
+- Microsoft Teams als firefoxpwa-PWA installiert (`https://teams.cloud.microsoft`, ältere Installationen mit `teams.microsoft.com` funktionieren ebenfalls)
 
 ## Installation
 
@@ -42,12 +42,12 @@ Teams kennt zwei Link-Welten:
 | Format | Wer registriert es |
 |--------|--------------------|
 | `msteams://` / `msteams:/l/…` | nativer Desktop-Client |
-| `https://teams.microsoft.com/l/…` | Web / PWA |
+| `https://teams.cloud.microsoft/l/…` | Web / PWA |
 
 Der Wrapper nimmt eine `msteams:`-URL entgegen, entfernt Schema und optionalen Host,
-prependet `https://teams.microsoft.com` und startet die PWA damit
+prependet `https://teams.cloud.microsoft` und startet die PWA damit
 (`firefoxpwa site launch <id> --url <url>`). Die firefoxpwa-Site-ID wird zur Laufzeit
-automatisch ermittelt (Match über die `teams.microsoft.com`-URL), lässt sich aber per
+automatisch ermittelt (Match über die `teams.microsoft.com`- bzw. `teams.cloud.microsoft`-URL), lässt sich aber per
 `MSTEAMS_PWA_ID=` erzwingen.
 
 ## Grenzen

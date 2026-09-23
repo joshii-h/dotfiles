@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # msteams-pwa-handler
 # Öffnet msteams:// Deeplinks in einer als PWA (firefoxpwa) installierten
-# Microsoft-Teams-Instanz, indem der Link nach https://teams.microsoft.com/...
+# Microsoft-Teams-Instanz, indem der Link nach https://teams.cloud.microsoft/...
 # umgeschrieben und im PWA-Fenster geöffnet wird.
 #
 # Die firefoxpwa-Site-ID wird zur Laufzeit automatisch ermittelt, damit derselbe
@@ -18,10 +18,11 @@ die() {
 command -v firefoxpwa >/dev/null 2>&1 \
     || die "firefoxpwa ist nicht installiert."
 
-# Teams-PWA-ID ermitteln (per Env überschreibbar). Match über die
-# teams.microsoft.com-URL, damit ein umbenannter/lokalisierter App-Name egal ist.
+# Teams-PWA-ID ermitteln (per Env überschreibbar). Match über die Teams-URL
+# (alt teams.microsoft.com, neu teams.cloud.microsoft), damit ein
+# umbenannter/lokalisierter App-Name egal ist.
 PWA_ID="${MSTEAMS_PWA_ID:-$(firefoxpwa profile list 2>/dev/null \
-    | grep -iE 'teams\.microsoft\.com' \
+    | grep -iE 'teams\.(microsoft\.com|cloud\.microsoft)' \
     | grep -oE '\([0-9A-Z]{26}\)' | tr -d '()' | head -n1)}"
 
 [[ -n "$PWA_ID" ]] \
@@ -33,10 +34,12 @@ if [[ -z "$url" ]]; then
     exec firefoxpwa site launch "$PWA_ID"
 fi
 
-# msteams:[//teams.microsoft.com]/l/...  ->  https://teams.microsoft.com/l/...
+# msteams:[//teams.microsoft.com|//teams.cloud.microsoft]/l/...
+#   ->  https://teams.cloud.microsoft/l/...
 rest="${url#msteams:}"
 rest="${rest#//teams.microsoft.com}"
+rest="${rest#//teams.cloud.microsoft}"
 rest="${rest#//}"
 [[ "$rest" == /* ]] || rest="/$rest"
 
-exec firefoxpwa site launch "$PWA_ID" --url "https://teams.microsoft.com${rest}"
+exec firefoxpwa site launch "$PWA_ID" --url "https://teams.cloud.microsoft${rest}"
