@@ -616,6 +616,87 @@ _sysup_emerge_summary() {
   ' "$log"
 }
 
+# Kompakter flatpak-Report statt der Fortschrittsbalken. Die Operationen
+# kommen aus flatpak upgrades Planungstabelle ("N.<TAB><TAB>ID<TAB>Branch<TAB>
+# Op<TAB>Remote<TAB>< Groesse"), die Versionen aus den __SYSUP_FP-Snapshots
+# (flatpak list vor/nach dem Upgrade), die der sysup-Job ins Log schreibt.
+_sysup_flatpak_summary() {
+  local log=$1
+  awk -F'\t' -v logpath="$log" '
+    function bytes(s,   n, u) {
+      gsub(/\302\240/, " ", s); sub(/^< */, "", s)
+      n = s + 0; u = s; sub(/^[0-9.]+ */, "", u)
+      return n * (u ~ /^GB/ ? 1e9 : u ~ /^MB/ ? 1e6 : u ~ /^kB/ ? 1e3 : 1)
+    }
+    function human(b) {
+      return b >= 1e9 ? sprintf("%.1f GB", b / 1e9) : b >= 1e6 ? sprintf("%.1f MB", b / 1e6) : sprintf("%.0f kB", b / 1e3)
+    }
+    { sub(/\r$/, ""); sub(/.*\r/, "") }
+    $1 == "__SYSUP_FP__" {
+      split($4, r, "/"); k = r[1] "/" r[3]
+      if ($2 == "old") oldv[k] = $5; else newv[k] = $5
+      kind[k] = $3; next
+    }
+    /^__SYSUP_RC=/ { rc = substr($0, 13) + 0; have_rc = 1; next }
+    $1 ~ /^ *[0-9]+\.$/ && NF >= 6 {
+      k = $3 "/" $4; op[++np] = $5; key[np] = k; size[np] = bytes($7); total += size[np]
+      next
+    }
+    /^(Info|Warning):/ { msg[++nm] = $0; last_msg = 1; next }
+    /^([Ee]rror):/     { fail[++nf] = $0; last_msg = 2; next }
+    # eingerueckte Folgezeile (z.B. EOL-Begruendung) gehoert zur Meldung davor
+    /^[ \t]+[^ \t]/ && last_msg {
+      l = $0; sub(/^[ \t]+/, "", l)
+      if (last_msg == 1) msg[nm] = msg[nm] " " l; else fail[nf] = fail[nf] " " l
+      next
+    }
+    { last_msg = 0 }
+    /^Nothing to (update|do)\./ { nothing = 1 }
+    END {
+      for (i = 1; i <= np; i++) {
+        k = key[i]; id = k; br = k; sub(/\/.*/, "", id); sub(/^[^\/]*\//, "", br)
+        if (op[i] == "u")      { sym = "↑"; col = "36"; n_up++ }
+        else if (op[i] == "i") { sym = "+"; col = "32"; n_new++ }
+        else if (op[i] == "r") { sym = "−"; col = "31"; n_rm++ }
+        else                   { sym = op[i]; col = "0"; n_other++ }
+        ver = ""
+        if (op[i] == "r")                             ver = oldv[k]
+        else if (oldv[k] != "" && newv[k] != "" && oldv[k] != newv[k]) ver = oldv[k] " → " newv[k]
+        else if (newv[k] != "")                       ver = newv[k]
+        info = (br == "stable" ? "" : br)
+        if (ver != "") info = info (info == "" ? "" : "  ") ver
+        line = sprintf("    \033[%sm%s\033[0m %-42s \033[2m%-28s %9s\033[0m", col, sym, id, info, size[i] ? human(size[i]) : "")
+        # Apps zuerst, Runtimes/Erweiterungen danach
+        if (kind[k] == "app") apps[++na] = line; else rts[++nr] = line
+      }
+      if (np) {
+        hdr = ""
+        if (n_up)    hdr = hdr sprintf("\033[36m↑ %d Updates\033[0m  ", n_up)
+        if (n_new)   hdr = hdr sprintf("\033[32m+ %d neu\033[0m  ", n_new)
+        if (n_rm)    hdr = hdr sprintf("\033[31m− %d entfernt\033[0m  ", n_rm)
+        if (n_other) hdr = hdr sprintf("%d sonstige  ", n_other)
+        if (total)   hdr = hdr sprintf("\033[2m%s Download\033[0m", human(total))
+        printf "  %s\n", hdr
+        for (i = 1; i <= na; i++) print apps[i]
+        if (na && nr) printf "    \033[2mRuntimes:\033[0m\n"
+        for (i = 1; i <= nr; i++) print rts[i]
+      } else if (nothing) {
+        printf "  \033[32m✓\033[0m alles aktuell\n"
+      }
+      for (i = 1; i <= nm; i++) printf "  \033[33m!\033[0m %s\n", msg[i]
+      if (nf) {
+        printf "  \033[1;31m✗ Fehler:\033[0m\n"
+        for (i = 1; i <= nf; i++) printf "    %s\n", fail[i]
+      }
+      if (!have_rc)
+        printf "  \033[1;31m✗ flatpak nicht regulär beendet (kein Exit-Code im Log - abgeschossen?)\033[0m\n"
+      else if (rc)
+        printf "  \033[1;31m✗ flatpak upgrade endete mit Exit-Code %d\033[0m\n", rc
+      if (nf || !have_rc || rc) printf "  \033[2mvolles Log: %s\033[0m\n", logpath
+    }
+  ' "$log"
+}
+
 # Lock fuer sysup-shutdown: erste Zeile "boot <boot_id>", dann je Prozess
 # "<pid> <starttime>" (Feld 22 aus /proc/<pid>/stat). Nur ein Eintrag mit
 # gleicher Boot-ID UND gleicher Startzeit gilt als lebend - ~/.cache liegt auf
@@ -731,7 +812,18 @@ sysup() {
       echo "__SYSUP_RC=$rc"' &>"${logs[1]}" &!
     local emerge_pid=$!
     pids+=($emerge_pid)
-    setsid flatpak upgrade -y &>"${logs[2]}" &!
+    # Die Snapshots vor/nach dem Upgrade liefern _sysup_flatpak_summary die
+    # Versionen, die flatpak upgrade selbst nicht ausgibt.
+    setsid zsh -fc '_snap() {
+        local kind
+        for kind in app runtime; do
+          flatpak list --$kind --columns=ref,version | sed "s/^/__SYSUP_FP__\t$1\t$kind\t/"
+        done
+      }
+      _snap old
+      flatpak upgrade -y; rc=$?
+      _snap new
+      echo "__SYSUP_RC=$rc"' &>"${logs[2]}" &!
     pids+=($!)
     setsid chezmoi update --no-tty &>"${logs[3]}" &!
     local dotfiles_pid=$!
@@ -797,6 +889,8 @@ sysup() {
       printf "\n\033[1;36m--- %s ---\033[0m\n" "${names[$j]}"
       if [[ "${names[$j]}" == emerge ]]; then
         _sysup_emerge_summary "${logs[$j]}"
+      elif [[ "${names[$j]}" == flatpak ]]; then
+        _sysup_flatpak_summary "${logs[$j]}"
       else
         cat "${logs[$j]}"
       fi
@@ -808,9 +902,12 @@ sysup() {
     fi
     # Die Job-Logs stecken jetzt in der Zusammenfassung; Reste verlassener Laeufe
     # nach einem Tag weg.
-    rm -f ${logs[2,-1]}
-    local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) $logdir/summary-*.txt(Nom[11,-1])
-                     $logdir/(flatpak|dotfiles|proton-ge|ai)-*.log(Nmh+24) )
+    # Das flatpak-Log bleibt wie das emerge-Log (die Zusammenfassung verweist
+    # bei Fehlern darauf).
+    rm -f ${logs[3,-1]}
+    local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) $logdir/flatpak-*.log(Nom[11,-1])
+                     $logdir/summary-*.txt(Nom[11,-1])
+                     $logdir/(dotfiles|proton-ge|ai)-*.log(Nmh+24) )
     (( $#stale )) && rm -f $stale
     printf "\n\033[1;32m✓ Done in %ds\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$((SECONDS - start))" "$summary"
   } always {
