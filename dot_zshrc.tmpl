@@ -791,14 +791,15 @@ sysup() {
     # auch in EMERGE_DEFAULT_OPTS, bleiben hier aber explizit, damit sysup nicht
     # still von make.conf abhaengt.
     # eclean-kernel laeuft am Ende der emerge-Kette, weil emerge zuvor evtl. einen
-    # neuen Kernel installiert hat. -n 3 = die 3 neuesten behalten; der laufende
-    # Kernel wird immer geschuetzt, und ohne -d bleibt alles unangetastet, was
+    # neuen Kernel installiert hat. -n 2 = der neueste plus ein Reserve-Kernel;
+    # der laufende Kernel wird zusaetzlich immer geschuetzt (z.B. wenn nach einem
+    # Rueckfall der Reserve-Kernel laeuft), und ohne -d bleibt alles unangetastet, was
     # GRUB referenziert. Raeumt auch /lib/modules + regeneriert grub.cfg.
     setsid zsh -fc "$(functions _sysup_sync)"'
       _sysup_sync \
         && echo __SYSUP_STAGE=world         && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world \
         && echo __SYSUP_STAGE=depclean      && command sudo emerge --depclean \
-        && echo __SYSUP_STAGE=eclean-kernel && command sudo eclean-kernel -n 3
+        && echo __SYSUP_STAGE=eclean-kernel && command sudo eclean-kernel -n 2
       rc=$?
       # Leichen in /etc/portage (Eintraege fuer nicht installierte, stabil
       # gewordene oder ungueltige Pakete) nur melden, nie anfassen; aendert
