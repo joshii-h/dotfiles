@@ -744,7 +744,7 @@ sysup() {
   # NO_BG_NICE: sonst liefen flatpak/chezmoi/ai mit nice +5 (emerge regelt
   # seine Prioritaet selbst ueber PORTAGE_NICENESS).
   setopt LOCAL_OPTIONS LOCAL_TRAPS NO_NOTIFY NO_MONITOR NO_BG_NICE
-  local -a names=(emerge flatpak dotfiles proton-ge ai)
+  local -a names=(emerge flatpak dotfiles proton-ge ai steam)
   # Das emerge-Log und die komplette Zusammenfassung bleiben liegen (je die
   # letzten 10 Laeufe): nach sysup-shutdown ist das Terminal weg, ohne
   # gespeicherte Zusammenfassung blieben Fehler von flatpak/ai/proton unsichtbar.
@@ -830,6 +830,26 @@ sysup() {
     local dotfiles_pid=$!
     pids+=($dotfiles_pid)
     setsid $HOME/.local/bin/proton-ge-update &>"${logs[4]}" &!
+    local proton_pid=$!
+    pids+=($proton_pid)
+    # Spiele aktualisiert der Steam-Client selbst (AutoUpdateBehavior 0), er muss
+    # nur laufen; SteamCMD bräuchte einen eigenen Login samt Steam Guard und
+    # die Windows-Plattform pro Spiel. Gestartet wird erst nach proton-ge, weil
+    # Steam neue Compat-Tools nur beim Start einliest. Steam selbst läuft per
+    # setsid -f losgelöst weiter und steht nicht im Lock, sysup-shutdown wartet
+    # also nicht auf die Downloads. Läuft der Watcher schon, lohnt der Start nicht.
+    setsid zsh -fc 'print "wartet auf proton-ge ..."
+      while kill -0 $1 2>/dev/null; do sleep 2; done
+      if pgrep -x steam >/dev/null; then
+        print "Steam läuft bereits und aktualisiert die Spiele selbst"
+        grep -q "Installiert: " $2 2>/dev/null \
+          && print "  \033[33m!\033[0m neues GE-Proton erst nach einem Steam-Neustart wählbar"
+      elif pgrep -f "^\S*bash \S*/sysup-shutdown( |$)" >/dev/null; then
+        print "Steam nicht gestartet - sysup-shutdown schaltet den Rechner danach aus"
+      else
+        setsid -f steam -silent </dev/null &>/dev/null
+        print "Steam im Hintergrund gestartet (-silent) - Spiele-Updates laufen dort"
+      fi' _ $proton_pid "${logs[4]}" &>"${logs[6]}" &!
     pids+=($!)
     # ai wartet auf dotfiles (frisch synchronisierte ai-Skripte + Hermes-Patch)
     # und auf die emerge-Kette, die evtl. gerade ROCm- oder Python-Libs
@@ -908,7 +928,7 @@ sysup() {
     rm -f ${logs[3,-1]}
     local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) $logdir/flatpak-*.log(Nom[11,-1])
                      $logdir/summary-*.txt(Nom[11,-1])
-                     $logdir/(dotfiles|proton-ge|ai)-*.log(Nmh+24) )
+                     $logdir/(dotfiles|proton-ge|ai|steam)-*.log(Nmh+24) )
     (( $#stale )) && rm -f $stale
     printf "\n\033[1;32m✓ Done in %ds\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$((SECONDS - start))" "$summary"
   } always {
