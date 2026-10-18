@@ -449,6 +449,13 @@ _sysup_sync() {
 _sysup_emerge_summary() {
   local log=$1
   awk -v logpath="$log" '
+    # Harten Abbruch (maskierte Abhaengigkeit ohne "skipped"-Block) melden.
+    function blockflush(   k) {
+      k = (pend_top != "" ? pend_top : "?") " braucht " pend_dep
+      k = k (pend_why != "" ? " (maskiert: " pend_why ")" : " (maskiert)")
+      if (!bseen[k]++) block[++nb] = k
+      pend_dep = ""; pend_top = ""; pend_why = ""
+    }
     function atomsplit(s) {
       sub(/::.*$/, "", s); sub(/:.*$/, "", s); sub(/\.+$/, "", s)
       A_name = s; A_ver = ""
@@ -543,9 +550,24 @@ _sysup_emerge_summary() {
     skipping && cur_skip == "" && /^[a-z0-9-]+\/[^ ]+/ { cur_skip = $1; next }
     /^!!! All ebuilds that could satisfy "/ {
       dep = $0; sub(/^[^"]*"/, "", dep); sub(/".*$/, "", dep)
-      k = (cur_skip != "" ? cur_skip : "?") " (braucht " dep ", maskiert)"
-      if (!sseen[k]++) skip[++ns] = k
+      if (cur_skip != "") {
+        k = cur_skip " (braucht " dep ", maskiert)"
+        if (!sseen[k]++) skip[++ns] = k
+      } else {
+        # Kein "skipped"-Block davor: harter Abbruch, das ganze Update steht.
+        # Verursacher steht in der "(dependency required by"-Kette darunter.
+        pend_dep = dep; pend_top = ""; pend_why = ""
+      }
       skipping = 0; cur_skip = ""
+      next
+    }
+    pend_dep != "" && pend_why == "" && /^- .*\(masked by: / {
+      pend_why = $0; sub(/.*\(masked by: /, "", pend_why); sub(/\).*$/, "", pend_why)
+      next
+    }
+    pend_dep != "" && /^\(dependency required by "/ {
+      req = $0; sub(/^[^"]*"/, "", req); sub(/".*$/, "", req)
+      if (req ~ /^@/) { blockflush() } else { sub(/::.*$/, "", req); pend_top = req }
       next
     }
     /^!!! One of the following masked packages is required/ { next }
@@ -587,7 +609,10 @@ _sysup_emerge_summary() {
       for (i = 1; i <= nk; i++) printf "    \033[2m%s\033[0m\n", kern[i]
       for (i = 1; i <= nn; i++) printf "  \033[33m!\033[0m %s\n", note[i]
       if (cur_skip != "") { k = cur_skip " (unerfüllte Abhängigkeit)"; if (!sseen[k]++) skip[++ns] = k }
+      if (pend_dep != "") blockflush()
       for (i = 1; i <= ns; i++) printf "  \033[33m⚠ Update übersprungen:\033[0m %s\n", skip[i]
+      for (i = 1; i <= nb; i++) printf "  \033[1;31m✗ Update blockiert:\033[0m %s\n", block[i]
+      if (nb) printf "    \033[2mFreigabe nötig - Vorschlag: emerge -puDN @world --autounmask\033[0m\n"
       if (no_obs) {
         printf "  \033[33m⚠ %d Leichen in /etc/portage\033[0m \033[2m(nur Hinweis, Details: eix-test-obsolete)\033[0m\n", no_obs
         for (i = 1; i <= no_obs; i++) printf "    %-42s \033[2m%s\033[0m\n", oorder[i], olabel[oorder[i]]
