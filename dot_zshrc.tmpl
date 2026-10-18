@@ -769,7 +769,7 @@ sysup() {
   # NO_BG_NICE: sonst liefen flatpak/chezmoi/ai mit nice +5 (emerge regelt
   # seine Prioritaet selbst ueber PORTAGE_NICENESS).
   setopt LOCAL_OPTIONS LOCAL_TRAPS NO_NOTIFY NO_MONITOR NO_BG_NICE
-  local -a names=(emerge flatpak dotfiles proton-ge ai steam)
+  local -a names=(emerge flatpak dotfiles proton-ge ai steam firmware)
   # Das emerge-Log und die komplette Zusammenfassung bleiben liegen (je die
   # letzten 10 Laeufe): nach sysup-shutdown ist das Terminal weg, ohne
   # gespeicherte Zusammenfassung blieben Fehler von flatpak/ai/proton unsichtbar.
@@ -883,6 +883,28 @@ sysup() {
       while kill -0 $1 2>/dev/null || kill -0 $2 2>/dev/null; do sleep 2; done
       exec $HOME/ai/ai-update.sh' _ $emerge_pid $dotfiles_pid &>"${logs[5]}" &!
     pids+=($!)
+    # Firmware (fwupd/LVFS) nur pruefen, nie installieren: Updates brauchen oft
+    # einen Neustart und koennen ein Geraet unbrauchbar machen. Das Log bleibt
+    # leer, wenn es nichts gibt (oder fwupd scheitert) - dann zeigt die
+    # Zusammenfassung den Abschnitt gar nicht. refresh endet mit 2, wenn die
+    # Metadaten schon aktuell sind.
+    setsid zsh -fc '(( $+commands[fwupdmgr] )) || exit 0
+      timeout 120 fwupdmgr refresh </dev/null &>/dev/null
+      timeout 120 fwupdmgr get-updates --json --no-unreported-check </dev/null 2>/dev/null \
+        | python3 -Ic "
+import json, sys
+try:
+    devs = json.load(sys.stdin).get(\"Devices\", [])
+except ValueError:
+    sys.exit(0)
+for d in devs:
+    rel = d.get(\"Releases\") or [{}]
+    print(\"  \\033[33m⚠ Firmware-Update verfügbar:\\033[0m %s (%s → %s)\" % (
+        d.get(\"Name\", \"?\"), d.get(\"Version\", \"?\"), rel[0].get(\"Version\", \"?\")))
+if devs:
+    print(\"    \\033[2minstallieren mit: fwupdmgr update (danach meist Neustart)\\033[0m\")
+"' &>"${logs[7]}" &!
+    pids+=($!)
     _sysup_lock_update $lock $$ $pids
     trap "_sysup_lock_update ${(q)lock} $pids" EXIT
     local lines=$(( ${#names} + 2 ))
@@ -932,6 +954,8 @@ sysup() {
     fi
     interrupted=0
     for j in {1..${#names}}; do
+      # firmware meldet sich nur, wenn es Updates gibt.
+      [[ ${names[$j]} == firmware && ! -s ${logs[$j]} ]] && continue
       printf "\n\033[1;36m--- %s ---\033[0m\n" "${names[$j]}"
       if [[ "${names[$j]}" == emerge ]]; then
         _sysup_emerge_summary "${logs[$j]}"
@@ -953,7 +977,7 @@ sysup() {
     rm -f ${logs[3,-1]}
     local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) $logdir/flatpak-*.log(Nom[11,-1])
                      $logdir/summary-*.txt(Nom[11,-1])
-                     $logdir/(dotfiles|proton-ge|ai|steam)-*.log(Nmh+24) )
+                     $logdir/(dotfiles|proton-ge|ai|steam|firmware)-*.log(Nmh+24) )
     (( $#stale )) && rm -f $stale
     printf "\n\033[1;32m✓ Done in %ds\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$((SECONDS - start))" "$summary"
   } always {
