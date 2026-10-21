@@ -1,0 +1,6 @@
+#!/bin/bash
+# Manuell volle Bildwiederholrate erzwingen bzw. wieder freigeben.
+F="$HOME/.cache/refresh-switch.force-high"
+if [ -e "$F" ]; then rm -f "$F"; msg="Automatik: Desktop wieder mit 60 Hz"
+else mkdir -p "${F%/*}"; touch "$F"; msg="Volle Bildwiederholrate erzwungen (165/90 Hz)"; fi
+notify-send -a "Bildwiederholrate" -i video-display "$msg"

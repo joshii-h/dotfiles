@@ -21,6 +21,15 @@ ai/**
 .config/autostart/plasmashell-watchdog.desktop
 {{- end }}
 
+# Hz-Automatik (Desktop 60 Hz, Spiele volle Hz) ist auf die Monitore der
+# Battlestation zugeschnitten (DP-1 165 Hz, HDMI-A-2 90 Hz) -> nur Gentoo.
+{{- if ne .distro "gentoo" }}
+.local/bin/refresh-switch
+.local/bin/refresh-switch-toggle
+.config/autostart/refresh-switch.desktop
+.local/share/applications/refresh-switch-toggle.desktop
+{{- end }}
+
 # AI-Stack: nur die Skripte/Configs versionieren, nicht die schweren
 # Laufzeit-/Modell-/Clone-Verzeichnisse und generierten Artefakte.
 ai/venv/**

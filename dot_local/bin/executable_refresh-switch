@@ -1,0 +1,54 @@
+#!/bin/bash
+# Bildwiederholrate nach Bedarf: Desktop alle Monitore 60 Hz (VRAM der RX 7900
+# taktet runter, ~22 W statt ~74 W), sobald ein Spiel läuft volle Hz.
+# Spiel erkannt an: Steam-Prozess "SteamLaunch AppId=", aktivem GameMode
+# oder dem manuellen Schalter (refresh-switch-toggle).
+HIGH="DP-1=165 HDMI-A-2=90"
+LOW="DP-1=60 HDMI-A-2=60"
+FORCE="$HOME/.cache/refresh-switch.force-high"
+LOG="$HOME/.local/state/refresh-switch.log"
+
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/refresh-switch.lock"
+flock -n 9 || exit 0
+
+apply() {  # $1 = "NAME=HZ ..." → passenden Modus (gleiche Auflösung) setzen
+	local args
+	args=$(kscreen-doctor -j 2>/dev/null | python3 -I -c '
+import json, sys
+want = dict(x.split("=") for x in sys.argv[1].split())
+out = []
+for o in json.load(sys.stdin)["outputs"]:
+    if o["name"] not in want or not o.get("enabled"):
+        continue
+    cur = next((m for m in o["modes"] if m["id"] == o["currentModeId"]), None)
+    if not cur:
+        continue
+    hz = float(want[o["name"]])
+    res = cur["name"].split("@")[0]
+    cands = [m for m in o["modes"] if m["name"].split("@")[0] == res]
+    best = min(cands, key=lambda m: abs(m["refreshRate"] - hz))
+    if best["id"] != cur["id"] and abs(best["refreshRate"] - hz) < 3:
+        out.append("output.%s.mode.%s" % (o["name"], best["id"]))
+print(" ".join(out))' "$1")
+	[ -n "$args" ] && kscreen-doctor $args >/dev/null 2>&1
+	echo "$(date '+%F %T') $2 ${args:-(schon gesetzt)}" >>"$LOG"
+}
+
+gaming() {
+	[ -e "$FORCE" ] && return 0
+	pgrep -f 'SteamLaunch AppId=' >/dev/null && return 0
+	gamemoded -s 2>/dev/null | grep -q 'is active'
+}
+
+state= idle=0
+while :; do
+	if gaming; then
+		idle=0
+		[ "$state" != high ] && { apply "$HIGH" Spiel; state=high; }
+	else
+		# erst nach ~10 s ohne Spiel zurück (Launcher/Neustarts überbrücken)
+		idle=$((idle + 1))
+		[ "$state" != low ] && [ $idle -ge 3 -o -z "$state" ] && { apply "$LOW" Desktop; state=low; }
+	fi
+	sleep 3
+done

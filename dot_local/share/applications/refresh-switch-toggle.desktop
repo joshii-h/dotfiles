@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Gaming-Hz umschalten
+Comment=Volle Bildwiederholrate erzwingen / zurück zur Automatik
+Exec=/home/joshii/.local/bin/refresh-switch-toggle
+Icon=video-display
+Categories=Utility;
+Keywords=hz;refresh;monitor;gaming;

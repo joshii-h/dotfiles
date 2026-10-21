@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Bildwiederholrate-Automatik
+Comment=Desktop 60 Hz, Spiele volle Hz (spart ~50 W an der GPU)
+Exec=/home/joshii/.local/bin/refresh-switch
+X-KDE-autostart-phase=2
+NoDisplay=true
