@@ -1,8 +1,8 @@
 #!/bin/bash
 # Bildwiederholrate nach Bedarf: Desktop alle Monitore 60 Hz (VRAM der RX 7900
 # taktet runter, ~22 W statt ~74 W), sobald ein Spiel läuft volle Hz.
-# Spiel erkannt an: Steam-Prozess "SteamLaunch AppId=", aktivem GameMode
-# oder dem manuellen Schalter (refresh-switch-toggle).
+# Spiel erkannt an: Steam-Prozess "SteamLaunch AppId=", Programmen aus ~/Games,
+# aktivem GameMode oder dem manuellen Schalter (refresh-switch-toggle).
 HIGH="DP-1=165 HDMI-A-2=90"
 LOW="DP-1=60 HDMI-A-2=60"
 FORCE="$HOME/.cache/refresh-switch.force-high"
@@ -37,6 +37,7 @@ print(" ".join(out))' "$1")
 gaming() {
 	[ -e "$FORCE" ] && return 0
 	pgrep -f 'SteamLaunch AppId=' >/dev/null && return 0
+	pgrep -f "^$HOME/Games/" >/dev/null && return 0
 	gamemoded -s 2>/dev/null | grep -q 'is active'
 }
 
