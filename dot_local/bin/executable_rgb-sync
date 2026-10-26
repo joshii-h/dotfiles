@@ -258,6 +258,13 @@ ZONES = {"logo": "logo", "scroll": "scroll_wheel", "left": "left", "right": "rig
          "backlight": "backlight"}
 # Helligkeit je Gerät in Prozent (das Dock strahlt sonst am hellsten)
 BRIGHTNESS = {"Razer Mouse Dock": 40}
+# Zusätzlicher Vorlauf in Sekunden: OpenRazer/Firmware zeigen die Farbe erst
+# deutlich nach dem Schreiben an. Per Webcam gemessen (2026-10-27) gegen die
+# pünktliche Tastatur: Maus +1,5 s, Dock +1,25 s Versatz.
+RAZER_LEAD = {"Razer Basilisk Ultimate (Receiver)": 0.5, "Razer Mouse Dock": 1.25}
+# Mindestabstand zwischen zwei Farbwechseln: Die Funkmaus braucht 4 Befehle
+# (Zonen) je Wechsel und staut sie sonst auf – der Versatz wächst dann.
+RAZER_MIN_INTERVAL = {"Razer Basilisk Ultimate (Receiver)": 1.0}
 
 
 class Razer:
@@ -303,21 +310,30 @@ class Razer:
             log(f"{d.name}: Helligkeit nicht gesetzt ({e})")
         log("OpenRazer:", d.name, f"{level} %")
         has_batt = bool(caps.get("battery"))
-        lat, charging, charge_check, last = 0.3, False, 0.0, None
+        lead = RAZER_LEAD.get(d.name, 1.3)
+        min_gap = RAZER_MIN_INTERVAL.get(d.name, 0.0)
+        last_write = 0.0
+        lat, charging, asleep, charge_check, last = 0.3, False, False, 0.0, None
         while True:
             now = time.time()
             try:
                 if has_batt and now > charge_check:
                     charge_check = now + 10
                     charging = bool(d.is_charging)
-                if charging:         # Maus im Dock: eigene Ladeanzeige stehen lassen
+                    # schlafende Funkmaus meldet 0 % – nichts schicken, sonst
+                    # stauen sich Befehle und werden beim Aufwachen nachgeholt
+                    asleep = not charging and d.battery_level <= 0
+                if charging or asleep:   # im Dock: eigene Ladeanzeige stehen lassen
                     time.sleep(1)
                     continue
-                rgb = hsv2rgb(color_at(self.state["cols"], now + lat))
+                if now - last_write < min_gap:
+                    time.sleep(min(0.05, min_gap - (now - last_write)))
+                    continue
+                rgb = hsv2rgb(color_at(self.state["cols"], now + lat + lead))
                 if rgb == last:
                     time.sleep(0.05)
                     continue
-                t0 = time.time()
+                t0 = last_write = time.time()
                 if caps.get("lighting_static"):
                     d.fx.static(*rgb)
                 for z, attr in ZONES.items():
