@@ -19,13 +19,14 @@ neu starten; rgb-sync verbindet sich dann neu.
 
   rgb-sync            # Dienst (Autostart)
   rgb-sync --setup    # venv mit openrgb-python anlegen (einmalig)
-  rgb-sync --once     # Palette einmal anwenden (ohne Animation) und beenden
+  rgb-sync --once     # OpenRGB und CoolerControl einmal setzen (ohne Animation)
 """
 import colorsys
 import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 
@@ -41,7 +42,6 @@ CC_TOKEN = os.path.join(CFG, "coolercontrol/token")
 FADE = 6.0       # Sekunden Überblendung zur nächsten Farbe
 HOLD = 3.0       # Sekunden auf jeder Farbe stehen bleiben
 FPS = 20         # Bilder pro Sekunde für OpenRGB
-RAZER_FPS = 4    # Funkmaus: seltener schreiben (Akku, Funkstrecke)
 
 if "--setup" in sys.argv:
     subprocess.run([sys.executable, "-m", "venv", "--system-site-packages", VENV], check=True)
@@ -131,9 +131,25 @@ def color_at(cols, now):
 
 class OpenRGB:
     def __init__(self):
-        self.client, self.devs, self.next_try = None, [], 0
+        self.client, self.devs, self.next_try, self.recheck = None, [], 0, 0
 
     def connect(self):
+        # Server sucht nach dem Start noch Geräte, oder es kam eines dazu
+        # (z. B. RAM nach `modprobe i2c-dev`): regelmäßig neu verbinden
+        if self.client and (not self.devs or time.time() > self.recheck):
+            try:
+                self.client.update()
+                if len(self.client.devices) == len(self.devs) and self.devs:
+                    self.recheck = time.time() + 60
+                    return
+            except Exception:
+                pass
+            try:
+                self.client.disconnect()
+            except Exception:
+                pass
+            self.client = None
+            self.next_try = time.time() + (10 if not self.devs else 0)
         if self.client or time.time() < self.next_try:
             return
         try:
@@ -146,6 +162,7 @@ class OpenRGB:
                 elif "static" in names:
                     d.set_mode("static")
                 self.devs.append(d)
+            self.recheck = time.time() + 60
             log("OpenRGB:", ", ".join(d.name for d in self.devs) or "keine Geräte")
         except Exception as e:
             self.client, self.next_try = None, time.time() + 10
@@ -167,58 +184,78 @@ class OpenRGB:
 
 ZONES = {"logo": "logo", "scroll": "scroll_wheel", "left": "left", "right": "right",
          "backlight": "backlight"}
+# Helligkeit je Gerät in Prozent (das Dock strahlt sonst am hellsten)
+BRIGHTNESS = {"Razer Mouse Dock": 40}
 
 
 class Razer:
-    def __init__(self):
-        self.devs, self.next_try = None, 0
-        self.charging, self.charge_check = {}, 0
+    """Ein Thread je Gerät: Funkmaus braucht ~600 ms je Farbwechsel (4 Zonen),
+    das Dock ~200 ms. Jeder Thread schickt die Farbe, die bei Ankunft gilt
+    (um die gemessene Laufzeit vorausberechnet) – so bleiben Maus, Dock und
+    Tastatur im Gleichtakt, und die Hauptschleife wird nicht ausgebremst."""
 
-    def update_charging(self):
-        """Ladende Geräte (Maus im Dock) behalten ihre eigene Ladeanzeige."""
-        if time.time() < self.charge_check:
-            return
-        self.charge_check = time.time() + 10
-        for d in self.devs or []:
-            try:
-                self.charging[d.serial] = bool(d.capabilities.get("battery") and d.is_charging)
-            except Exception:
-                self.charging[d.serial] = False
+    def __init__(self, state):
+        self.state = state          # {"cols": [...]} – von der Hauptschleife gepflegt
+        self.threads = {}
+        self.next_try = 0
 
-    def connect(self):
-        if self.devs is not None or time.time() < self.next_try:
+    def ensure(self):
+        if time.time() < self.next_try:
             return
+        self.next_try = time.time() + 30
+        alive = {k for k, t in self.threads.items() if t.is_alive()}
         try:
             from openrazer.client import DeviceManager
-            self.devs = list(DeviceManager().devices)
-            for d in self.devs:
-                caps = d.capabilities
-                if caps.get("brightness"):
-                    d.brightness = 100
-                for z, attr in ZONES.items():
-                    if caps.get(f"lighting_{z}_brightness"):
-                        getattr(d.fx.misc, attr).brightness = 100
-            log("OpenRazer:", ", ".join(d.name for d in self.devs) or "keine Geräte")
+            devs = list(DeviceManager().devices)
         except Exception as e:
-            self.devs, self.next_try = None, time.time() + 15
-            log("OpenRazer nicht erreichbar:", e)
-
-    def show(self, rgb):
-        self.connect()
-        self.update_charging()
-        for d in self.devs or []:
-            if self.charging.get(d.serial):
+            if not alive:
+                log("OpenRazer nicht erreichbar:", e)
+            return
+        for d in devs:
+            if d.serial in alive:
                 continue
-            caps = d.capabilities
+            t = threading.Thread(target=self.run, args=(d,), daemon=True)
+            self.threads[d.serial] = t
+            t.start()
+
+    def run(self, d):
+        caps = d.capabilities
+        level = BRIGHTNESS.get(d.name, 100)
+        try:
+            if caps.get("brightness"):
+                d.brightness = level
+            for z, attr in ZONES.items():
+                if caps.get(f"lighting_{z}_brightness"):
+                    getattr(d.fx.misc, attr).brightness = level
+        except Exception as e:
+            log(f"{d.name}: Helligkeit nicht gesetzt ({e})")
+        log("OpenRazer:", d.name, f"{level} %")
+        has_batt = bool(caps.get("battery"))
+        lat, charging, charge_check, last = 0.3, False, 0.0, None
+        while True:
+            now = time.time()
             try:
+                if has_batt and now > charge_check:
+                    charge_check = now + 10
+                    charging = bool(d.is_charging)
+                if charging:         # Maus im Dock: eigene Ladeanzeige stehen lassen
+                    time.sleep(1)
+                    continue
+                rgb = hsv2rgb(color_at(self.state["cols"], now + lat))
+                if rgb == last:
+                    time.sleep(0.05)
+                    continue
+                t0 = time.time()
                 if caps.get("lighting_static"):
                     d.fx.static(*rgb)
                 for z, attr in ZONES.items():
                     if caps.get(f"lighting_{z}_static"):
                         getattr(d.fx.misc, attr).static(*rgb)
-            except Exception:
-                # Maus schläft oder Daemon neu gestartet: später neu verbinden
-                self.devs, self.next_try = None, time.time() + 15
+                # Laufzeit glätten; die Farbe soll in der Mitte der Übertragung stimmen
+                lat = 0.8 * lat + 0.2 * ((time.time() - t0) / 2)
+                last = rgb
+            except Exception as e:
+                log(f"{d.name}: Verbindung verloren ({e}) – neuer Versuch später")
                 return
 
 
@@ -262,19 +299,18 @@ def cc_apply(cols):
 # ---------- Hauptschleife ----------
 
 def main():
-    orgb, razer = OpenRGB(), Razer()
     cols = load_palette()
+    state = {"cols": cols}
+    orgb, razer = OpenRGB(), Razer(state)
     if "--once" in sys.argv:
-        rgb = hsv2rgb(cols[0])
-        orgb.show(rgb)
-        razer.show(rgb)
+        orgb.show(hsv2rgb(cols[0]))
         cc_apply(cols)
         return
 
     mtime = os.path.getmtime(PALETTE) if os.path.exists(PALETTE) else 0
     cc_ok = cc_apply(cols)
     cc_retry = time.time() + 30
-    last_razer, last_rgb = 0.0, None
+    last_rgb = None
     log("Palette:", ["#%02x%02x%02x" % hsv2rgb(c) for c in cols])
 
     while True:
@@ -287,18 +323,17 @@ def main():
         if m != mtime:
             time.sleep(0.3)            # matugen schreibt gerade
             mtime, cols = m, load_palette()
+            state["cols"] = cols
             log("Neue Palette:", ["#%02x%02x%02x" % hsv2rgb(c) for c in cols])
             cc_ok = cc_apply(cols)
             cc_retry = now + 30
         elif not cc_ok and now > cc_retry:
             cc_ok, cc_retry = cc_apply(cols), now + 30
 
+        razer.ensure()
         rgb = hsv2rgb(color_at(cols, now))
         if rgb != last_rgb:
             orgb.show(rgb)
-            if now - last_razer >= 1 / RAZER_FPS:
-                razer.show(rgb)
-                last_razer = now
             last_rgb = rgb
         time.sleep(1 / FPS)
 
