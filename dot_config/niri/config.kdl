@@ -1,0 +1,130 @@
+// niri – zweite Sitzung neben KDE Plasma (Battlestation)
+// Doku: https://github.com/niri-wm/niri/wiki/Configuration:-Introduction
+// Oberfläche: DankMaterialShell / Dux Shell (dms) – Leiste, Starter,
+// Benachrichtigungen, Sperre, Hintergrund. Einstellungen: Mod+Komma
+// Prüfen nach Änderungen: niri validate
+
+input {
+    keyboard {
+        xkb {
+            layout "ch"
+            model "pc105"
+        }
+        numlock
+    }
+    mouse {
+        accel-profile "flat"
+    }
+    // Fokus springt mit, wenn die Maus auf einen anderen Monitor wechselt
+    focus-follows-mouse max-scroll-amount="0%"
+    warp-mouse-to-focus
+}
+
+// Anordnung wie unter KDE. Desktop mit 60 Hz – refresh-switch schaltet bei
+// Spielen auf volle Hz (165/90), damit der VRAM im Leerlauf runtertaktet.
+output "HDMI-A-2" {
+    mode "2560x1080@59.940"
+    position x=0 y=0
+    variable-refresh-rate on-demand=true
+}
+output "DP-1" {
+    mode "1920x1080@60.000"
+    position x=2560 y=0
+    variable-refresh-rate on-demand=true
+    focus-at-startup
+}
+output "HDMI-A-1" {
+    mode "1920x1080@60.000"
+    position x=4480 y=0
+}
+
+layout {
+    gaps 8
+    center-focused-column "never"
+    preset-column-widths {
+        proportion 0.33333
+        proportion 0.5
+        proportion 0.66667
+        proportion 1.0
+    }
+    default-column-width { proportion 0.5; }
+
+    // Farben, Rahmen und Abstände kommen von DMS (dms/colors.kdl, dms/layout.kdl)
+    shadow { on; }
+}
+
+cursor {
+    xcursor-theme "Bibata-Modern-Classic"
+    xcursor-size 24
+}
+
+prefer-no-csd
+screenshot-path "~/Pictures/Screenshots/%Y-%m-%d %H-%M-%S.png"
+hotkey-overlay { skip-at-startup; }
+
+environment {
+    // Qt-Programme: Aussehen und Farben über qt6ct (Farben liefert DMS/matugen)
+    QT_QPA_PLATFORMTHEME "qt6ct"
+    ELECTRON_OZONE_PLATFORM_HINT "auto"
+}
+
+// Autostart: DMS ist die komplette Oberfläche (Leiste, Benachrichtigungen,
+// Starter, Sperrbildschirm, Polkit, Hintergrund, Bildschirm-Aus).
+// dex startet ~/.config/autostart + /etc/xdg/autostart, dieselben Einträge
+// wie unter KDE; reine KDE-Dienste tragen OnlyShowIn=KDE. Xwayland (Steam,
+// Spiele, Horizon) startet niri bei Bedarf über xwayland-satellite.
+spawn-at-startup "dms" "run"
+// Thunar im Hintergrund: schnellerer Start + USB-Laufwerke automatisch einbinden
+spawn-at-startup "thunar" "--daemon"
+spawn-at-startup "dex" "--autostart" "--environment" "niri"
+
+// VRR nur für Spiele (on-demand), Desktop bleibt fest
+window-rule {
+    match app-id=r#"^steam_app_"#
+    match app-id="gamescope"
+    variable-refresh-rate true
+    open-fullscreen true
+}
+window-rule {
+    match title="Bildwiederholrate"
+    open-floating true
+}
+window-rule {
+    match app-id="steam" title=r#"^notificationtoasts_\d+_desktop$"#
+    default-floating-position x=10 y=10 relative-to="bottom-right"
+}
+layer-rule {
+    match namespace="^quickshell$"
+    place-within-backdrop true
+}
+
+// DMS-Bausteine (von `dms setup …` erzeugt, werden von DMS überschrieben)
+include "dms/colors.kdl"
+include "dms/layout.kdl"
+include "dms/alttab.kdl"
+include "dms/binds.kdl"
+
+// Eigene Ergänzungen – stehen nach dms/binds.kdl und überschreiben dort
+// gleich belegte Tasten. Alle DMS-Kürzel: Mod+F1 bzw. dms/binds.kdl.
+binds {
+    Mod+F1 hotkey-overlay-title="Tastenkürzel anzeigen" { show-hotkey-overlay; }
+
+    Mod+E hotkey-overlay-title="Dateien (Thunar)" { spawn "thunar"; }
+    Mod+B hotkey-overlay-title="Firefox" { spawn "firefox"; }
+    Mod+F12 hotkey-overlay-title="Hz-Automatik umschalten" { spawn "refresh-switch-toggle"; }
+    Ctrl+Alt+Delete hotkey-overlay-title="Ausschalt-Menü" { spawn "dms" "ipc" "call" "powermenu" "toggle"; }
+
+    // Spalten-Navigation läuft am Rand nahtlos auf den Nachbarmonitor weiter
+    Mod+Left  { focus-column-or-monitor-left; }
+    Mod+Right { focus-column-or-monitor-right; }
+    Mod+H     { focus-column-or-monitor-left; }
+    Mod+L     { focus-column-or-monitor-right; }
+    Mod+Shift+Left  { move-column-left-or-to-monitor-left; }
+    Mod+Shift+Right { move-column-right-or-to-monitor-right; }
+    Mod+Shift+H     { move-column-left-or-to-monitor-left; }
+    Mod+Shift+L     { move-column-right-or-to-monitor-right; }
+    Mod+WheelScrollRight { focus-column-or-monitor-right; }
+    Mod+WheelScrollLeft  { focus-column-or-monitor-left; }
+    Mod+Shift+WheelScrollDown cooldown-ms=150 { focus-column-or-monitor-right; }
+    Mod+Shift+WheelScrollUp   cooldown-ms=150 { focus-column-or-monitor-left; }
+}

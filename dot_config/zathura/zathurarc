@@ -1,0 +1,6 @@
+# zathura – PDF-Betrachter (Tastatur wie vim: j/k scrollen, / suchen, +/- zoom)
+set selection-clipboard clipboard   # markierter Text landet in der normalen Zwischenablage
+set adjust-open "width"             # PDFs auf Fensterbreite öffnen
+set guioptions ""                   # keine Leisten, nur das Dokument
+set font "FiraCode Nerd Font 11"
+set recolor-keephue true            # mit Strg+R dunkler Modus, Farben bleiben erkennbar

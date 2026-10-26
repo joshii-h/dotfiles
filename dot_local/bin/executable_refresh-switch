@@ -3,6 +3,7 @@
 # taktet runter, ~22 W statt ~74 W), sobald ein Spiel läuft volle Hz.
 # Spiel erkannt an: Steam-Prozess "SteamLaunch AppId=", Programmen aus ~/Games,
 # aktivem GameMode oder dem manuellen Schalter (refresh-switch-toggle).
+# Läuft unter KDE Plasma (kscreen-doctor) und niri (niri msg).
 HIGH="DP-1=165 HDMI-A-2=90"
 LOW="DP-1=60 HDMI-A-2=60"
 FORCE="$HOME/.cache/refresh-switch.force-high"
@@ -11,7 +12,12 @@ LOG="$HOME/.local/state/refresh-switch.log"
 exec 9>"${XDG_RUNTIME_DIR:-/tmp}/refresh-switch.lock"
 flock -n 9 || exit 0
 
-apply() {  # $1 = "NAME=HZ ..." → passenden Modus (gleiche Auflösung) setzen
+apply() {  # $1 = "NAME=HZ ...", $2 = Grund fürs Log
+	if [ -n "${NIRI_SOCKET:-}" ]; then apply_niri "$@"; else apply_kscreen "$@"; fi
+}
+
+# KDE Plasma: passenden Modus (gleiche Auflösung) per kscreen-doctor setzen
+apply_kscreen() {
 	local args
 	args=$(kscreen-doctor -j 2>/dev/null | python3 -I -c '
 import json, sys
@@ -32,6 +38,28 @@ for o in json.load(sys.stdin)["outputs"]:
 print(" ".join(out))' "$1")
 	[ -n "$args" ] && kscreen-doctor $args >/dev/null 2>&1
 	echo "$(date '+%F %T') $2 ${args:-(schon gesetzt)}" >>"$LOG"
+}
+
+# niri: gleiche Logik über `niri msg` (refresh_rate dort in mHz)
+apply_niri() {
+	local modes m
+	modes=$(niri msg --json outputs 2>/dev/null | python3 -I -c '
+import json, sys
+want = dict(x.split("=") for x in sys.argv[1].split())
+for name, o in json.load(sys.stdin).items():
+    if name not in want or o.get("current_mode") is None:
+        continue
+    cur = o["modes"][o["current_mode"]]
+    hz = float(want[name]) * 1000
+    cands = [m for m in o["modes"] if (m["width"], m["height"]) == (cur["width"], cur["height"])]
+    best = min(cands, key=lambda m: abs(m["refresh_rate"] - hz))
+    if best is not cur and best["refresh_rate"] != cur["refresh_rate"] and abs(best["refresh_rate"] - hz) < 3000:
+        print("%s %dx%d@%.3f" % (name, best["width"], best["height"], best["refresh_rate"] / 1000))
+' "$1")
+	while read -r m; do
+		[ -n "$m" ] && niri msg output ${m% *} mode ${m#* } >/dev/null 2>&1
+	done <<<"$modes"
+	echo "$(date '+%F %T') $2 ${modes:+$(echo $modes)}${modes:-(schon gesetzt)}" >>"$LOG"
 }
 
 gaming() {

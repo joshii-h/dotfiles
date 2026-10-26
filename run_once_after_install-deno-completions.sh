@@ -6,10 +6,10 @@ if ! command -v deno &>/dev/null; then
     exit 0
 fi
 
-mkdir -p "$HOME/completions"
-mkdir -p "$HOME/.oh-my-zsh/custom/plugins/deno"
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/completions"
+mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/oh-my-zsh/custom/plugins/deno"
 
-deno completions zsh > "$HOME/completions/_deno"
-cp "$HOME/completions/_deno" "$HOME/.oh-my-zsh/custom/plugins/deno/_deno"
+deno completions zsh > "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/completions/_deno"
+cp "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/completions/_deno" "${XDG_DATA_HOME:-$HOME/.local/share}/oh-my-zsh/custom/plugins/deno/_deno"
 
 echo "deno completions installed"

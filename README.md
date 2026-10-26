@@ -6,9 +6,9 @@ chezmoi-managed dotfiles for **Fedora** (primary) and **Gentoo**.
 
 | File | Template | Notes |
 |---|---|---|
-| `~/.zshrc` | Yes | `sysup()` per distro (dnf on Fedora, emerge on Gentoo) |
+| `~/.config/zsh/.zshrc` | Yes | `sysup()` per distro (dnf on Fedora, emerge on Gentoo) |
 | `~/.zshenv` | Yes | Cargo env — sourced only if `~/.cargo/env` exists |
-| `~/.gitconfig` | Yes | delta pager, user/email per distro |
+| `~/.config/git/config` | Yes | delta pager, user/email per distro |
 | `~/.config/git/ignore` | No | Global gitignore |
 | `~/.config/gh/config.yml` | No | GitHub CLI config |
 | `~/.config/kitty/kitty.conf` | No | Portable |

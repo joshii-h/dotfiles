@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Eigene Rechtsklick-Aktionen für Thunar -->
+<actions>
+<action>
+	<icon>kitty</icon>
+	<name>Terminal hier öffnen</name>
+	<submenu></submenu>
+	<unique-id>battlestation-terminal</unique-id>
+	<command>kitty --directory %f</command>
+	<description>kitty in diesem Ordner starten</description>
+	<range></range>
+	<patterns>*</patterns>
+	<startup-notify/>
+	<directories/>
+</action>
+<action>
+	<icon>system-file-manager</icon>
+	<name>In yazi öffnen</name>
+	<submenu></submenu>
+	<unique-id>battlestation-yazi</unique-id>
+	<command>kitty -e yazi %f</command>
+	<description>Ordner im Terminal-Dateimanager yazi öffnen</description>
+	<range></range>
+	<patterns>*</patterns>
+	<directories/>
+</action>
+<action>
+	<icon>visual-studio-code</icon>
+	<name>In VS Code öffnen</name>
+	<submenu></submenu>
+	<unique-id>battlestation-vscode</unique-id>
+	<command>code %F</command>
+	<description>Ordner oder Dateien in VS Code öffnen</description>
+	<range></range>
+	<patterns>*</patterns>
+	<directories/>
+	<text-files/>
+	<other-files/>
+</action>
+<action>
+	<icon>edit-copy</icon>
+	<name>Pfad kopieren</name>
+	<submenu></submenu>
+	<unique-id>battlestation-copypath</unique-id>
+	<command>sh -c 'printf "%%s" "$1" | wl-copy' _ %f</command>
+	<description>Vollständigen Pfad in die Zwischenablage kopieren</description>
+	<range>1-1</range>
+	<patterns>*</patterns>
+	<directories/>
+	<audio-files/>
+	<image-files/>
+	<other-files/>
+	<text-files/>
+	<video-files/>
+</action>
+<action>
+	<icon>preferences-desktop-wallpaper</icon>
+	<name>Als Hintergrundbild setzen</name>
+	<submenu></submenu>
+	<unique-id>battlestation-wallpaper</unique-id>
+	<command>dms ipc call wallpaper set %f</command>
+	<description>Bild als Hintergrund setzen (Farben passen sich an)</description>
+	<range>1-1</range>
+	<patterns>*</patterns>
+	<image-files/>
+</action>
+<action>
+	<icon>document-edit</icon>
+	<name>Texterkennung (OCR)</name>
+	<submenu></submenu>
+	<unique-id>battlestation-ocr</unique-id>
+	<command>ocr-file %F</command>
+	<description>Durchsuchbares PDF erzeugen (_ocr.pdf daneben)</description>
+	<range></range>
+	<patterns>*.pdf;*.PDF;*.jpg;*.jpeg;*.JPG;*.png;*.PNG;*.tif;*.tiff;*.webp</patterns>
+	<image-files/>
+	<other-files/>
+</action>
+<action>
+	<icon>baobab</icon>
+	<name>Speicherbelegung anzeigen</name>
+	<submenu></submenu>
+	<unique-id>battlestation-ncdu</unique-id>
+	<command>kitty -e ncdu %f</command>
+	<description>Was belegt hier wie viel Platz? (ncdu)</description>
+	<range>1-1</range>
+	<patterns>*</patterns>
+	<directories/>
+</action>
+<action>
+	<icon>security-high</icon>
+	<name>Prüfsumme (SHA-256) kopieren</name>
+	<submenu></submenu>
+	<unique-id>battlestation-sha256</unique-id>
+	<command>sh -c 'h=$(sha256sum -- "$1" | cut -d" " -f1); printf "%%s" "$h" | wl-copy; notify-send -a Thunar "SHA-256 kopiert" "$h"' _ %f</command>
+	<description>SHA-256 berechnen und in die Zwischenablage kopieren</description>
+	<range>1-1</range>
+	<patterns>*</patterns>
+	<audio-files/>
+	<image-files/>
+	<other-files/>
+	<text-files/>
+	<video-files/>
+</action>
+</actions>

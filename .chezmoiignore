@@ -10,15 +10,8 @@ msteams-pwa-handler/**
 
 # AI-Stack (ROCm, Hermes) und Proton-GE laufen nur im Gentoo-sysup.
 {{- if ne .distro "gentoo" }}
-ai/**
+.local/share/ai/**
 .local/bin/proton-ge-update
-{{- end }}
-
-# plasmashell-Watchdog nur ohne systemd noetig (dort macht es
-# plasma-plasmashell.service mit Restart=on-failure).
-{{- if ne .distro "gentoo" }}
-.local/bin/plasmashell-watchdog
-.config/autostart/plasmashell-watchdog.desktop
 {{- end }}
 
 # Hz-Automatik (Desktop 60 Hz, Spiele volle Hz) ist auf die Monitore der
@@ -32,14 +25,29 @@ ai/**
 
 # AI-Stack: nur die Skripte/Configs versionieren, nicht die schweren
 # Laufzeit-/Modell-/Clone-Verzeichnisse und generierten Artefakte.
-ai/venv/**
-ai/ComfyUI/**
-ai/odysseus/**
-ai/hermes-agent/**
-ai/models/**
-ai/.miopen/**
-ai/media-mcp/outputs/**
-ai/incoming/**
-ai/*.log
-ai/*.png
-ai/*.wav
+.local/share/ai/venv/**
+.local/share/ai/ComfyUI/**
+.local/share/ai/odysseus/**
+.local/share/ai/hermes-agent/**
+.local/share/ai/models/**
+.local/share/ai/.miopen/**
+.local/share/ai/media-mcp/outputs/**
+.local/share/ai/incoming/**
+.local/share/ai/*.log
+.local/share/ai/*.png
+.local/share/ai/*.wav
+
+# niri-Sitzung (zweite Sitzung neben Plasma, OpenRC-Starter in /usr/local)
+# mit Monitor-Layout der Battlestation -> nur Gentoo.
+{{- if ne .distro "gentoo" }}
+.config/niri/**
+.config/xdg-desktop-portal/niri-portals.conf
+.config/Thunar/**
+.config/gtk-3.0/bookmarks
+.config/xfce4/**
+.config/niri/dms/**
+.local/bin/dms-update
+.local/bin/uosc-update
+{{- end }}
+.config/nvim/colors/dms.lua
+.config/nvim/lua/lualine/themes/dms.lua

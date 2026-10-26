@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#
+# uosc-update — installiert/aktualisiert uosc, die moderne Bedienleiste für mpv.
+#
+# Holt das neueste Release von tomasklaen/uosc und entpackt es nach
+# ~/.config/mpv (scripts/uosc + fonts). Die eigene Einstellungsdatei
+# ~/.config/mpv/script-opts/uosc.conf bleibt unangetastet.
+#
+#   uosc-update           # neueste Version installieren (falls neuer)
+#   uosc-update --force   # neu installieren, auch wenn schon aktuell
+#
+set -euo pipefail
+
+REPO="tomasklaen/uosc"
+MPV="${XDG_CONFIG_HOME:-$HOME/.config}/mpv"
+STAMP="$MPV/scripts/uosc/.version"
+
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    --force)   FORCE=1 ;;
+    -h|--help) sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf '\033[1;31mEE\033[0m Unbekannte Option: %s\n' "$arg" >&2; exit 2 ;;
+  esac
+done
+
+info() { printf '\033[1;34m::\033[0m %s\n' "$*"; }
+err()  { printf '\033[1;31mEE\033[0m %s\n' "$*" >&2; }
+
+for t in curl unzip; do
+  command -v "$t" >/dev/null || { err "Benötigtes Tool fehlt: $t"; exit 1; }
+done
+
+info "Ermittle neueste uosc-Version ..."
+url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")
+TAG=${url##*/}
+case "$TAG" in [0-9]*|v[0-9]*) ;; *) err "Konnte die neueste Version nicht ermitteln (${url})"; exit 1 ;; esac
+
+CUR=$(cat "$STAMP" 2>/dev/null || true)
+if [ "$CUR" = "$TAG" ] && [ "$FORCE" -eq 0 ]; then
+  info "uosc ${CUR} ist aktuell."
+  exit 0
+fi
+info "Aktualisiere uosc ${CUR:-(nicht installiert)} → ${TAG} ..."
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+curl -fsSL -o "$TMP/uosc.zip" "https://github.com/${REPO}/releases/download/${TAG}/uosc.zip"
+unzip -q "$TMP/uosc.zip" -d "$TMP/x"
+[ -f "$TMP/x/scripts/uosc/main.lua" ] || { err "Unerwarteter Archivinhalt – nichts ersetzt."; exit 1; }
+
+mkdir -p "$MPV/scripts" "$MPV/fonts"
+rm -rf "$MPV/scripts/uosc"
+cp -r "$TMP/x/scripts/uosc" "$MPV/scripts/"
+cp -r "$TMP/x/fonts/." "$MPV/fonts/"
+echo "$TAG" > "$STAMP"
+# Beispiel-Einstellungen nur beim ersten Mal ablegen
+if [ ! -f "$MPV/script-opts/uosc.conf" ]; then
+  mkdir -p "$MPV/script-opts"
+  curl -fsSL -o "$MPV/script-opts/uosc.conf" "https://github.com/${REPO}/releases/download/${TAG}/uosc.conf" || true
+fi
+info "Installiert: uosc ${TAG}"
