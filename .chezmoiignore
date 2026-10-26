@@ -74,3 +74,4 @@ msteams-pwa-handler/**
 {{- if eq .distro "gentoo" }}
 .config/starship.toml
 {{- end }}
+**/__pycache__
