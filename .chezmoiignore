@@ -53,6 +53,7 @@ msteams-pwa-handler/**
 .local/bin/dateimanager-aktion
 .local/bin/ordner-symbole
 .local/bin/grub-theme
+.config/sysup/**
 .config/niri/dms/**
 .local/bin/dms-update
 .local/bin/uosc-update

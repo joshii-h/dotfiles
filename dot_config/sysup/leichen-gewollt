@@ -1,0 +1,8 @@
+# Gewollte "Leichen" in /etc/portage – sysup zeigt sie weiter an, aber gedimmt
+# als "gewollt" statt als Warnung. Format: <Atom oder repo:NAME>  <Begründung>
+# repo:NAME gilt für alle nicht installierten Pakete dieses Overlays.
+www-client/firefox       ESR-Regel: immer neueste ESR, greift beim nächsten ESR-Sprung
+www-client/firefox-l10n  ESR-Regel: immer neueste ESR, greift beim nächsten ESR-Sprung
+media-libs/dav1d         ESR-Regel: immer neueste ESR, greift beim nächsten ESR-Sprung
+dev-libs/nss             ESR-Regel: immer neueste ESR, greift beim nächsten ESR-Sprung
+repo:steam-overlay       ganzes Steam-Overlay freigegeben (*/*::steam-overlay)
