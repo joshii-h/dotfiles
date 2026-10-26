@@ -88,9 +88,16 @@ window-rule {
     variable-refresh-rate true
     open-fullscreen true
 }
+// Passwort- und Rückfrage-Dialoge klein, schwebend und mittig statt als
+// Kachel-Spalte (SSH-Passphrase, Kerberos, Schlüsselbund, Polkit …)
 window-rule {
     match title="Bildwiederholrate"
+    match app-id=r#"^gcr-prompter$"#
+    match app-id=r#"^(gcr|org\.gnome\.keyring|org\.gnome\.Gcr)"#
+    match app-id=r#"^zenity$"#
+    match app-id=r#"^org\.gnome\.seahorse"# title=r#"(?i)passwor|passphrase|entsperr|unlock"#
     open-floating true
+    open-focused true
 }
 window-rule {
     match app-id="steam" title=r#"^notificationtoasts_\d+_desktop$"#
