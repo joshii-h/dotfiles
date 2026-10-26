@@ -14,10 +14,6 @@ output_path = "~/.config/yazi/theme.toml"
 input_path = "~/.config/matugen/templates/lazygit.yml"
 output_path = "~/.config/lazygit/config.yml"
 
-[templates.zathura]
-input_path = "~/.config/matugen/templates/zathura-colors"
-output_path = "~/.config/zathura/dms-colors"
-
 [templates.uosc]
 input_path = "~/.config/matugen/templates/mpv-uosc.conf"
 output_path = "~/.config/mpv/dms-uosc.conf"
