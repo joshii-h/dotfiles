@@ -52,6 +52,7 @@ msteams-pwa-handler/**
 .local/share/nemo/**
 .local/bin/dateimanager-aktion
 .local/bin/ordner-symbole
+.local/bin/grub-theme
 .config/niri/dms/**
 .local/bin/dms-update
 .local/bin/uosc-update
