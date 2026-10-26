@@ -49,6 +49,7 @@ msteams-pwa-handler/**
 .config/autostart/openrazer-daemon.desktop
 .config/autostart/rgb-sync.desktop
 .local/bin/rgb-sync
+.local/bin/rgb-sync-messen
 .config/gtk-3.0/bookmarks
 .config/gtk-3.0/gtk.css
 .config/gtk-3.0/battlestation.css

@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""rgb-sync-messen — misst per Webcam, wie weit Maus, Dock und Tastatur der
+Sollkurve von rgb-sync hinterherhinken (Kreuzkorrelation des Farbtons).
+
+Nimmt 40 s mit 4 Bildern/s auf (C920 auf /dev/video0, 1280×720) und gibt je
+Gerät den Versatz in Sekunden aus. Positiv = Gerät hinkt hinterher → den Wert
+zu RAZER_LEAD in rgb-sync addieren. Die Tastatur dient als Referenz (die
+Kamera selbst hat ~0,2–0,5 s Verzögerung). Maus vorher bewegen (sie schläft
+nach 4 min ein), Licht während der Messung nicht ändern.
+
+  rgb-sync-messen            # aufnehmen und auswerten
+  rgb-sync-messen -v         # zusätzlich Farbton-Verlauf ausgeben
+"""
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+vpy = os.path.expanduser("~/.local/share/rgb-sync/venv/bin/python")
+if sys.prefix == sys.base_prefix and os.path.exists(vpy):
+    os.execv(vpy, [vpy] + sys.argv)
+
+tmp = tempfile.mkdtemp(prefix="rgb-messen-")
+start = time.time()
+subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "v4l2", "-video_size", "1280x720",
+                "-framerate", "30", "-i", "/dev/video0", "-t", "40", "-vf", "fps=4",
+                "-q:v", "3", os.path.join(tmp, "f_%04d.jpg")], check=True, timeout=60)
+import colorsys, glob, math, json, sys
+from PIL import Image
+
+regions={'Maus':(335,285,390,370),'Dock':(470,300,580,432),'Tast':(645,275,1275,468)}
+def mean_hue(im, box):
+    xs=ys=n=0
+    for r,g,b in im.crop(box).convert('RGB').get_flattened_data():
+        h,s,v=colorsys.rgb_to_hsv(r/255,g/255,b/255)
+        if s>0.35 and v>0.30:
+            xs+=math.cos(2*math.pi*h); ys+=math.sin(2*math.pi*h); n+=1
+    return None if n<15 else math.degrees(math.atan2(ys,xs))%360
+pal=json.load(open(os.path.expanduser('~/.cache/matugen/rgb-palette.json')))
+def vivid(hx):
+    h,s,v=colorsys.rgb_to_hsv(*(int(hx[i:i+2],16)/255 for i in (1,3,5))); return (h,max(s,.9),1.0)
+cols=[]
+for k in ('primary','tertiary','secondary'):
+    c=vivid(pal[k])
+    if all(min(abs(c[0]-o[0])%1,1-abs(c[0]-o[0])%1)>0.055 for o in cols): cols.append(c)
+FADE,HOLD=6.0,3.0
+def exp_h(t):
+    seg=FADE+HOLD; pos=t%(seg*len(cols)); i=int(pos//seg); x=pos-i*seg
+    a,b=cols[i],cols[(i+1)%len(cols)]
+    if x<HOLD: return a[0]*360
+    u=(x-HOLD)/FADE; u=u*u*(3-2*u); dh=(b[0]-a[0])%1
+    if dh>.5: dh-=1
+    return ((a[0]+dh*u)%1)*360
+frames=sorted(glob.glob(os.path.join(tmp, 'f_*.jpg')))
+data={k:[] for k in regions}; soll=[]
+for i,f in enumerate(frames):
+    im=Image.open(f); t=start+i/4
+    soll.append(exp_h(t))
+    for k,b in regions.items(): data[k].append(mean_hue(im,b))
+def corr_lag(sig):
+    # Versatz (s), bei dem die normierte Kurve am besten zur Sollkurve passt
+    best=None
+    for lag in range(-8*4, 12*4+1):
+        pairs=[(soll[i-lag], sig[i]) for i in range(len(sig)) if 0<=i-lag<len(soll) and sig[i] is not None]
+        if len(pairs)<40: continue
+        xa=[p[0] for p in pairs]; ya=[p[1] for p in pairs]
+        mx,my=sum(xa)/len(xa),sum(ya)/len(ya)
+        sx=math.sqrt(sum((x-mx)**2 for x in xa)); sy=math.sqrt(sum((y-my)**2 for y in ya))
+        if sx==0 or sy==0: continue
+        r=sum((x-mx)*(y-my) for x,y in pairs)/(sx*sy)
+        if best is None or r>best[1]: best=(lag/4,r)
+    return best
+for k in regions:
+    l=corr_lag(data[k]); print(f"{k}: Versatz {l[0]:+.2f} s (Korrelation {l[1]:.2f})" if l else f"{k}: keine Daten")
+if '-v' in sys.argv:
+    print(" t[s]  soll  Maus  Dock  Tast")
+    for i in range(0,len(soll),4):
+        print(f"{i/4:5.1f} {soll[i]:5.0f} "+" ".join(f"{data[k][i]:5.0f}" if data[k][i] is not None else "   - " for k in regions))
+subprocess.run(["rm", "-rf", tmp])
