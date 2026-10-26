@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+#
+# dateimanager-aktion — gemeinsame Rechtsklick-Aktionen für Nautilus (Skripte)
+# und Nemo (Actions). Aufruf: dateimanager-aktion <aktion> [pfad ...]
+# Ohne Pfad gilt der aktuelle Ordner (Nautilus: NAUTILUS_SCRIPT_* Variablen).
+#
+#   terminal   kitty im Ordner öffnen          yazi     Ordner in yazi
+#   code       in VS Code öffnen               pfad     Pfad kopieren
+#   hintergrund  Bild als Hintergrund (DMS)    ocr      durchsuchbares PDF
+#   ncdu       Speicherbelegung anzeigen       sha256   SHA-256 kopieren
+#
+set -u
+aktion=${1:-}; shift || true
+
+# Pfade sammeln: Argumente, sonst Nautilus-Auswahl, sonst aktueller Ordner
+paths=("$@")
+if [ ${#paths[@]} -eq 0 ] && [ -n "${NAUTILUS_SCRIPT_SELECTED_FILE_PATHS:-}" ]; then
+  while IFS= read -r p; do [ -n "$p" ] && paths+=("$p"); done <<<"$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS"
+fi
+if [ ${#paths[@]} -eq 0 ]; then
+  cur=${NAUTILUS_SCRIPT_CURRENT_URI:-}
+  case "$cur" in file://*) cur=$(python3 -Ic 'import sys,urllib.parse;print(urllib.parse.unquote(sys.argv[1][7:]))' "$cur") ;; *) cur=$PWD ;; esac
+  paths=("$cur")
+fi
+first=${paths[0]}
+dir_of() { if [ -d "$1" ]; then printf '%s' "$1"; else dirname -- "$1"; fi; }
+note() { notify-send -a Dateimanager "$@" 2>/dev/null || true; }
+
+case "$aktion" in
+  terminal)    exec kitty --directory "$(dir_of "$first")" ;;
+  yazi)        exec kitty -e yazi "$first" ;;
+  code)        exec code "${paths[@]}" ;;
+  pfad)        printf '%s' "$first" | wl-copy && note "Pfad kopiert" "$first" ;;
+  hintergrund) dms ipc call wallpaper set "$first" >/dev/null && note "Hintergrund gesetzt" "$(basename -- "$first")" ;;
+  ocr)         exec ocr-file "${paths[@]}" ;;
+  ncdu)        exec kitty -e ncdu "$(dir_of "$first")" ;;
+  sha256)      h=$(sha256sum -- "$first" | cut -d' ' -f1); printf '%s' "$h" | wl-copy; note "SHA-256 kopiert" "$h" ;;
+  *)           echo "Unbekannte Aktion: $aktion" >&2; exit 2 ;;
+esac

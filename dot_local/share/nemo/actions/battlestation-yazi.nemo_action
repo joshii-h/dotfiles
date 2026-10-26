@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=In yazi öffnen
+Comment=In yazi öffnen
+Exec=dateimanager-aktion yazi %F
+Icon-Name=system-file-manager
+Selection=s
+Extensions=dir;

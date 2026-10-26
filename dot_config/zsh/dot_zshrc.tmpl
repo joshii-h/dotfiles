@@ -911,10 +911,12 @@ if devs:
     pids+=($!)
     # "rice": Teile des niri-Desktops, die nicht aus Portage kommen, sondern
     # als Releases von GitHub - Dux Shell (`dms`, sha256-geprüft) und uosc
-    # (Bedienleiste für mpv).
+    # (Bedienleiste für mpv); dazu ordner-symbole (Magenta-Symboltheme nach
+    # Papirus-Updates neu verknüpfen, neue Repos bekommen ihr Symbol).
     setsid zsh -fc '$HOME/.local/bin/dms-update; r1=$?
       $HOME/.local/bin/uosc-update; r2=$?
-      exit $(( r1 || r2 ))' &>"${logs[8]}" &!
+      $HOME/.local/bin/ordner-symbole; r3=$?
+      exit $(( r1 || r2 || r3 ))' &>"${logs[8]}" &!
     pids+=($!)
     _sysup_lock_update $lock $$ $pids
     trap "_sysup_lock_update ${(q)lock} $pids" EXIT

@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Terminal hier öffnen
+Comment=Terminal hier öffnen
+Exec=dateimanager-aktion terminal %F
+Icon-Name=kitty
+Selection=any
+Extensions=dir;

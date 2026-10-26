@@ -1,0 +1,20 @@
+# lazygit – Farben aus dem Hintergrundbild (matugen/DMS)
+gui:
+  nerdFontsVersion: "3"
+  theme:
+    activeBorderColor: ["{{colors.primary.dark.hex}}", "bold"]
+    inactiveBorderColor: ["{{colors.outline.dark.hex}}"]
+    searchingActiveBorderColor: ["{{colors.tertiary.dark.hex}}", "bold"]
+    optionsTextColor: ["{{colors.primary.dark.hex}}"]
+    selectedLineBgColor: ["{{colors.surface_container_high.dark.hex}}"]
+    inactiveViewSelectedLineBgColor: ["{{colors.surface_container.dark.hex}}"]
+    cherryPickedCommitFgColor: ["{{colors.on_tertiary_container.dark.hex}}"]
+    cherryPickedCommitBgColor: ["{{colors.tertiary_container.dark.hex}}"]
+    markedBaseCommitFgColor: ["{{colors.on_secondary_container.dark.hex}}"]
+    markedBaseCommitBgColor: ["{{colors.secondary_container.dark.hex}}"]
+    unstagedChangesColor: ["{{colors.error.dark.hex}}"]
+    defaultFgColor: ["{{colors.on_surface.dark.hex}}"]
+git:
+  paging:
+    colorArg: always
+    pager: delta --dark --paging=never

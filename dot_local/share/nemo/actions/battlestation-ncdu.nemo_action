@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Speicherbelegung anzeigen
+Comment=Speicherbelegung anzeigen
+Exec=dateimanager-aktion ncdu %F
+Icon-Name=baobab
+Selection=s
+Extensions=dir;

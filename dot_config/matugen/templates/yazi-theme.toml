@@ -1,0 +1,24 @@
+# yazi – Farben aus dem Hintergrundbild (matugen/DMS)
+[mgr]
+cwd = { fg = "{{colors.primary.dark.hex}}", bold = true }
+find_keyword = { fg = "{{colors.tertiary.dark.hex}}", bold = true }
+find_position = { fg = "{{colors.secondary.dark.hex}}" }
+marker_copied = { fg = "{{colors.secondary.dark.hex}}", bg = "{{colors.secondary.dark.hex}}" }
+marker_cut = { fg = "{{colors.error.dark.hex}}", bg = "{{colors.error.dark.hex}}" }
+marker_selected = { fg = "{{colors.primary.dark.hex}}", bg = "{{colors.primary.dark.hex}}" }
+border_style = { fg = "{{colors.outline_variant.dark.hex}}" }
+
+[mode]
+normal_main = { fg = "{{colors.on_primary.dark.hex}}", bg = "{{colors.primary.dark.hex}}", bold = true }
+normal_alt = { fg = "{{colors.primary.dark.hex}}", bg = "{{colors.surface_container_high.dark.hex}}" }
+select_main = { fg = "{{colors.on_tertiary.dark.hex}}", bg = "{{colors.tertiary.dark.hex}}", bold = true }
+select_alt = { fg = "{{colors.tertiary.dark.hex}}", bg = "{{colors.surface_container_high.dark.hex}}" }
+unset_main = { fg = "{{colors.on_secondary.dark.hex}}", bg = "{{colors.secondary.dark.hex}}", bold = true }
+unset_alt = { fg = "{{colors.secondary.dark.hex}}", bg = "{{colors.surface_container_high.dark.hex}}" }
+
+[status]
+perm_type = { fg = "{{colors.primary.dark.hex}}" }
+perm_read = { fg = "{{colors.secondary.dark.hex}}" }
+perm_write = { fg = "{{colors.error.dark.hex}}" }
+perm_exec = { fg = "{{colors.tertiary.dark.hex}}" }
+perm_sep = { fg = "{{colors.outline.dark.hex}}" }

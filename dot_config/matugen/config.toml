@@ -1,0 +1,27 @@
+# Eigene matugen-Vorlagen – DMS führt sie bei jedem Hintergrund-/Farbwechsel
+# mit aus (Einstellung „runUserMatugenTemplates“). Farben im dunklen Modus.
+[config]
+
+[templates.btop]
+input_path = "~/.config/matugen/templates/btop.theme"
+output_path = "~/.config/btop/themes/matugen.theme"
+
+[templates.yazi]
+input_path = "~/.config/matugen/templates/yazi-theme.toml"
+output_path = "~/.config/yazi/theme.toml"
+
+[templates.lazygit]
+input_path = "~/.config/matugen/templates/lazygit.yml"
+output_path = "~/.config/lazygit/config.yml"
+
+[templates.zathura]
+input_path = "~/.config/matugen/templates/zathura-colors"
+output_path = "~/.config/zathura/dms-colors"
+
+[templates.uosc]
+input_path = "~/.config/matugen/templates/mpv-uosc.conf"
+output_path = "~/.config/mpv/dms-uosc.conf"
+
+[templates.starship]
+input_path = "~/.config/matugen/templates/starship.toml"
+output_path = "~/.config/starship.toml"

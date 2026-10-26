@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Prüfsumme (SHA-256) kopieren
+Comment=Prüfsumme (SHA-256) kopieren
+Exec=dateimanager-aktion sha256 %F
+Icon-Name=security-high
+Selection=s
+Extensions=nodirs;

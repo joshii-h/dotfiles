@@ -4,3 +4,9 @@ set adjust-open "width"             # PDFs auf Fensterbreite öffnen
 set guioptions ""                   # keine Leisten, nur das Dokument
 set font "FiraCode Nerd Font 11"
 set recolor-keephue true            # mit Strg+R dunkler Modus, Farben bleiben erkennbar
+
+{{- if eq .distro "gentoo" }}
+
+# Farben aus dem Hintergrundbild (DMS/matugen)
+include dms-colors
+{{- end }}

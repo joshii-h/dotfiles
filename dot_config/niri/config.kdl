@@ -15,8 +15,6 @@ input {
     mouse {
         accel-profile "flat"
     }
-    // Fokus springt mit, wenn die Maus auf einen anderen Monitor wechselt
-    focus-follows-mouse max-scroll-amount="0%"
     warp-mouse-to-focus
 }
 
@@ -74,8 +72,8 @@ environment {
 // wie unter KDE; reine KDE-Dienste tragen OnlyShowIn=KDE. Xwayland (Steam,
 // Spiele, Horizon) startet niri bei Bedarf über xwayland-satellite.
 spawn-at-startup "dms" "run"
-// Thunar im Hintergrund: schnellerer Start + USB-Laufwerke automatisch einbinden
-spawn-at-startup "thunar" "--daemon"
+// Nautilus im Hintergrund: öffnet Fenster sofort
+spawn-at-startup "nautilus" "--gapplication-service"
 spawn-at-startup "dex" "--autostart" "--environment" "niri"
 
 // VRR nur für Spiele (on-demand), Desktop bleibt fest
@@ -109,7 +107,8 @@ include "dms/binds.kdl"
 binds {
     Mod+F1 hotkey-overlay-title="Tastenkürzel anzeigen" { show-hotkey-overlay; }
 
-    Mod+E hotkey-overlay-title="Dateien (Thunar)" { spawn "thunar"; }
+    Mod+E hotkey-overlay-title="Dateien (Nautilus)" { spawn "nautilus" "--new-window"; }
+    Mod+Alt+E hotkey-overlay-title="Dateien (Nemo, zum Vergleich)" { spawn "nemo"; }
     Mod+B hotkey-overlay-title="Firefox" { spawn "firefox"; }
     Mod+F12 hotkey-overlay-title="Hz-Automatik umschalten" { spawn "refresh-switch-toggle"; }
     Ctrl+Alt+Delete hotkey-overlay-title="Ausschalt-Menü" { spawn "dms" "ipc" "call" "powermenu" "toggle"; }

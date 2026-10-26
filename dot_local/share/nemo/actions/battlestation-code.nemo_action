@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=In VS Code öffnen
+Comment=In VS Code öffnen
+Exec=dateimanager-aktion code %F
+Icon-Name=visual-studio-code
+Selection=notnone
+Extensions=any;

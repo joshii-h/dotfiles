@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Als Hintergrundbild setzen
+Comment=Als Hintergrundbild setzen
+Exec=dateimanager-aktion hintergrund %F
+Icon-Name=preferences-desktop-wallpaper
+Selection=s
+Extensions=jpg;jpeg;png;webp;avif;jxl;gif;

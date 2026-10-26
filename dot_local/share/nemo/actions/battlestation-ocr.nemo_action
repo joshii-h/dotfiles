@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Texterkennung (OCR)
+Comment=Texterkennung (OCR)
+Exec=dateimanager-aktion ocr %F
+Icon-Name=document-edit
+Selection=notnone
+Extensions=pdf;jpg;jpeg;png;tif;tiff;webp;

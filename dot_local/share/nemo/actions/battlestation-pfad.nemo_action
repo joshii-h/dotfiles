@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=Pfad kopieren
+Comment=Pfad kopieren
+Exec=dateimanager-aktion pfad %F
+Icon-Name=edit-copy
+Selection=s
+Extensions=any;

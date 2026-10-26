@@ -42,12 +42,21 @@ msteams-pwa-handler/**
 {{- if ne .distro "gentoo" }}
 .config/niri/**
 .config/xdg-desktop-portal/niri-portals.conf
-.config/Thunar/**
+.config/matugen/**
 .config/gtk-3.0/bookmarks
-.config/xfce4/**
+.local/share/nautilus/**
+.local/share/nemo/**
+.local/bin/dateimanager-aktion
+.local/bin/ordner-symbole
 .config/niri/dms/**
 .local/bin/dms-update
 .local/bin/uosc-update
 {{- end }}
 .config/nvim/colors/dms.lua
 .config/nvim/lua/lualine/themes/dms.lua
+
+# Auf der Battlestation erzeugt matugen/DMS die starship.toml aus der Vorlage
+# in ~/.config/matugen/templates (Farben aus dem Hintergrundbild).
+{{- if eq .distro "gentoo" }}
+.config/starship.toml
+{{- end }}

@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+#
+# ordner-symbole — gibt Ordnern eigene Papirus-Symbole (Nautilus und Nemo).
+#
+# Baut zuerst das Symbol-Theme „Papirus-Dark-Magenta“ in ~/.local/share/icons
+# (erbt Papirus-Dark, nur Ordner/Benutzerordner in Magenta passend zum
+# Hintergrund; wird von sysup nach Papirus-Updates neu erzeugt).
+# Setzt dann die GIO-Metadaten metadata::custom-icon-name (Nautilus) und
+# metadata::custom-icon (Datei-URI, Nemo). Die XDG-Standardordner (Dokumente,
+# Bilder …) haben schon eigene Symbole und bleiben unangetastet.
+# Beliebig oft ausführbar, z. B. nach neuen Repos in ~/Projects.
+#
+#   ordner-symbole            # Symbole setzen
+#   ordner-symbole --reset    # alle eigenen Symbole wieder entfernen
+#
+set -u
+COLOR=magenta
+T="${XDG_DATA_HOME:-$HOME/.local/share}/icons/Papirus-Dark-Magenta"
+
+build_theme() {  # Verweise auf die $COLOR-Varianten von Papirus anlegen
+  local sd size src l tgt new nf dirs="" d s
+  [ -d /usr/share/icons/Papirus ] || { echo "Papirus fehlt" >&2; return 1; }
+  rm -rf "$T"; mkdir -p "$T"
+  for sd in /usr/share/icons/Papirus/*/places; do
+    size=$(basename "$(dirname "$sd")")
+    src=/usr/share/icons/Papirus-Dark/$size/places; [ -d "$src" ] || src=$sd
+    mkdir -p "$T/$size/places"
+    for l in "$src"/*.svg; do
+      [ -L "$l" ] || continue
+      tgt=$(readlink "$l")
+      case "$tgt" in *-blue*) ;; *) continue ;; esac
+      new=${tgt/-blue/-$COLOR}; nf="$(dirname "$(readlink -f "$l")")/$new"
+      # echte Kopie statt Verweis: Flatpaks sehen /usr/share/icons unter
+      # anderem Pfad, ein absoluter Symlink wäre dort kaputt (1,6 MB gesamt)
+      [ -e "$nf" ] && cp "$nf" "$T/$size/places/$(basename "$l")"
+    done
+    dirs="$dirs$size/places,"
+  done
+  {
+    echo "[Icon Theme]"; echo "Name=Papirus-Dark-Magenta"
+    echo "Comment=Papirus-Dark mit Ordnern in $COLOR (passend zum Hintergrund)"
+    echo "Inherits=Papirus-Dark,hicolor"; echo "Directories=${dirs%,}"
+    for d in ${dirs//,/ }; do
+      s=${d%%x*}; echo; echo "[$d]"; echo "Context=Places"; echo "Size=$s"
+      case $d in *@2x*) echo "Scale=2" ;; esac; echo "Type=Fixed"
+    done
+  } > "$T/index.theme"
+  gtk-update-icon-cache -q -f "$T" 2>/dev/null || true
+}
+
+RESET=0; [ "${1:-}" = --reset ] && RESET=1
+[ "$RESET" -eq 1 ] || build_theme
+THEME_DIR="$T/64x64/places"
+
+n=0
+
+icon() {  # icon <Ordner> <Symbolname>
+  local dir=$1 name=$2 file
+  [ -d "$dir" ] || return 0
+  if [ "$RESET" -eq 1 ]; then
+    gio set -t unset "$dir" metadata::custom-icon-name 2>/dev/null
+    gio set -t unset "$dir" metadata::custom-icon 2>/dev/null
+    return 0
+  fi
+  file="$THEME_DIR/$name.svg"
+  [ -e "$file" ] || file="/usr/share/icons/Papirus/64x64/places/$name.svg"
+  [ -e "$file" ] || { echo "Symbol fehlt im Theme: $name" >&2; return 0; }
+  gio set "$dir" metadata::custom-icon-name "$name"
+  gio set "$dir" metadata::custom-icon "file://$(readlink -f "$file")"
+  n=$((n + 1))
+}
+
+H=$HOME
+# Hauptordner
+icon "$H/Nextcloud"                     folder-nextcloud
+icon "$H/Projects"                      folder-projects
+icon "$H/Games"                         folder-games
+icon "$H/.local/share/ai"               folder-script
+
+# Nextcloud
+icon "$H/Nextcloud/Immeditech"          folder-favorites
+icon "$H/Nextcloud/Photos"              folder-photos
+icon "$H/Nextcloud/01_Scan"             folder-print
+icon "$H/Nextcloud/03_Lieferscheine"    folder-text
+icon "$H/Nextcloud/BlueFerry"           folder-sync
+
+# Dokumente
+icon "$H/Documents/Archiv"              folder-tar
+icon "$H/Documents/Backups"             folder-backup
+icon "$H/Documents/Scan"                folder-print
+
+# Bilder
+icon "$H/Pictures/Screenshots"          folder-camera
+icon "$H/Pictures/Wallpapers"           folder-images
+icon "$H/Pictures/stepshot"             folder-image
+
+# Spiele und Videos
+icon "$H/Games/Steam"                   folder-steam
+icon "$H/Games/Superposition"           folder-games
+icon "$H/Videos/Steam"                  folder-steam
+icon "$H/Videos/AnyDesk"                folder-remote
+icon "$H/Videos/RustDesk"               folder-remote
+
+# Repos in ~/Projects nach Herkunft
+shopt -s nullglob
+for r in "$H"/Projects/*/; do
+  r=${r%/}
+  url=$(git -C "$r" remote get-url origin 2>/dev/null || true)
+  case "$url" in
+    *github.com*)             icon "$r" folder-github ;;
+    *gitlab*)                 icon "$r" folder-gitlab ;;
+    *git.immeditech.ch*)      icon "$r" folder-git ;;
+    *git.joshuahirsig.xyz*)   icon "$r" folder-development ;;
+    "")                       icon "$r" folder-code ;;
+    *)                        icon "$r" folder-git ;;
+  esac
+done
+
+if [ "$RESET" -eq 1 ]; then
+  echo "Eigene Ordnersymbole entfernt."
+else
+  echo "$n Ordnern ein Symbol gegeben. (Nautilus/Nemo ggf. neu öffnen)"
+fi
