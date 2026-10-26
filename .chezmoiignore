@@ -43,6 +43,7 @@ msteams-pwa-handler/**
 .config/niri/**
 .config/xdg-desktop-portal/niri-portals.conf
 .config/matugen/**
+.config/gtk-2.0/gtkrc
 .config/gtk-3.0/bookmarks
 .config/gtk-3.0/gtk.css
 .config/gtk-3.0/battlestation.css

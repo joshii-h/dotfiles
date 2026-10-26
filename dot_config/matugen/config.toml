@@ -21,3 +21,10 @@ output_path = "~/.config/mpv/dms-uosc.conf"
 [templates.starship]
 input_path = "~/.config/matugen/templates/starship.toml"
 output_path = "~/.config/starship.toml"
+
+# Akzentfarbe für die Papirus-Ordner: ordner-symbole wählt die nächstliegende
+# Papirus-Farbe und baut „Papirus-Dark-Akzent“ nur bei Farbwechsel neu.
+[templates.ordnerfarbe]
+input_path = "~/.config/matugen/templates/akzent.txt"
+output_path = "~/.cache/matugen/akzent"
+post_hook = 'sh -c "$HOME/.local/bin/ordner-symbole --auto >/dev/null 2>&1 &"'

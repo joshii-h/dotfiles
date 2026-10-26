@@ -2,29 +2,60 @@
 #
 # ordner-symbole — gibt Ordnern eigene Papirus-Symbole (Nautilus und Nemo).
 #
-# Baut zuerst das Symbol-Theme „Papirus-Dark-Magenta“ in ~/.local/share/icons
-# (erbt Papirus-Dark, nur Ordner/Benutzerordner in Magenta passend zum
-# Hintergrund; wird von sysup nach Papirus-Updates neu erzeugt).
+# Baut zuerst das Symbol-Theme „Papirus-Dark-Akzent“ in ~/.local/share/icons
+# (erbt Papirus-Dark, nur Ordner/Benutzerordner in der Papirus-Farbe, die der
+# Akzentfarbe des Hintergrundbilds am nächsten kommt; wird von sysup nach
+# Papirus-Updates neu erzeugt).
 # Setzt dann die GIO-Metadaten metadata::custom-icon-name (Nautilus) und
 # metadata::custom-icon (Datei-URI, Nemo). Die XDG-Standardordner (Dokumente,
 # Bilder …) haben schon eigene Symbole und bleiben unangetastet.
 # Beliebig oft ausführbar, z. B. nach neuen Repos in ~/Projects.
 #
-#   ordner-symbole            # Symbole setzen
-#   ordner-symbole --reset    # alle eigenen Symbole wieder entfernen
+#   ordner-symbole                # Symbole setzen (Farbe wie zuletzt gewählt)
+#   ordner-symbole --farbe teal   # feste Papirus-Farbe wählen
+#   ordner-symbole --auto [HEX]   # Farbe aus Akzentfarbe ableiten, nur Theme
+#                                 # neu bauen (ruft matugen/DMS bei jedem
+#                                 # Hintergrundwechsel auf)
+#   ordner-symbole --reset        # alle eigenen Symbole wieder entfernen
 #
 set -u
-COLOR=magenta
-T="${XDG_DATA_HOME:-$HOME/.local/share}/icons/Papirus-Dark-Magenta"
+T="${XDG_DATA_HOME:-$HOME/.local/share}/icons/Papirus-Dark-Akzent"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/ordner-farbe"
+AKZENT="${XDG_CACHE_HOME:-$HOME/.cache}/matugen/akzent"
+COLOR=$(cat "$STATE" 2>/dev/null || echo magenta)
+
+# nächstliegende Papirus-Ordnerfarbe zu einer Hex-Farbe (Farbton zählt am meisten)
+naechste_farbe() {
+  python3 -I - "$1" <<'PY'
+import colorsys, sys
+# Vorderseite der Ordner (folder-<farbe>.svg, dritter Farbwert)
+P = {"adwaita": "93c0ea", "blue": "5294e2", "bluegrey": "607d8b", "breeze": "57b8ec",
+     "brown": "ae8e6c", "carmine": "a30002", "cyan": "00bcd4", "darkcyan": "45abb7",
+     "deeporange": "eb6637", "green": "87b158", "grey": "8e8e8e", "indigo": "5c6bc0",
+     "magenta": "ca71df", "nordic": "81a1c1", "orange": "ee923a", "palebrown": "d1bfae",
+     "paleorange": "eeca8f", "pink": "f06292", "red": "e25252", "teal": "16a085",
+     "violet": "7e57c2", "yellow": "f9bd30"}
+hsv = lambda h: colorsys.rgb_to_hsv(*(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)))
+h, s, v = hsv(sys.argv[1].lstrip("#"))
+if s < 0.15:
+    print("grey"); sys.exit()
+def score(c):
+    ch, cs, cv = hsv(c)
+    dh = abs(h - ch); dh = min(dh, 1 - dh) * 360
+    return dh + 30 * abs(s - cs) + 30 * abs(v - cv) + (999 if cs < 0.12 else 0)
+print(min(P, key=lambda k: score(P[k])))
+PY
+}
 
 build_theme() {  # Verweise auf die $COLOR-Varianten von Papirus anlegen
-  local sd size src l tgt new nf dirs="" d s
+  local sd size src l tgt new nf dirs="" d s B="$T.neu"
   [ -d /usr/share/icons/Papirus ] || { echo "Papirus fehlt" >&2; return 1; }
-  rm -rf "$T"; mkdir -p "$T"
+  # in Nebenordner bauen und erst am Ende tauschen: das Theme fehlt nie
+  rm -rf "$B"; mkdir -p "$B"
   for sd in /usr/share/icons/Papirus/*/places; do
     size=$(basename "$(dirname "$sd")")
     src=/usr/share/icons/Papirus-Dark/$size/places; [ -d "$src" ] || src=$sd
-    mkdir -p "$T/$size/places"
+    mkdir -p "$B/$size/places"
     for l in "$src"/*.svg; do
       [ -L "$l" ] || continue
       # ganze Verweiskette auflösen (z. B. folder-desktop → user-desktop →
@@ -34,24 +65,47 @@ build_theme() {  # Verweise auf die $COLOR-Varianten von Papirus anlegen
       new=${tgt/-blue/-$COLOR}; nf="$(dirname "$(readlink -f "$l")")/$new"
       # echte Kopie statt Verweis: Flatpaks sehen /usr/share/icons unter
       # anderem Pfad, ein absoluter Symlink wäre dort kaputt (1,6 MB gesamt)
-      [ -e "$nf" ] && cp "$nf" "$T/$size/places/$(basename "$l")"
+      [ -e "$nf" ] && cp "$nf" "$B/$size/places/$(basename "$l")"
     done
     dirs="$dirs$size/places,"
   done
   {
-    echo "[Icon Theme]"; echo "Name=Papirus-Dark-Magenta"
+    echo "[Icon Theme]"; echo "Name=Papirus-Dark-Akzent"
     echo "Comment=Papirus-Dark mit Ordnern in $COLOR (passend zum Hintergrund)"
     echo "Inherits=Papirus-Dark,hicolor"; echo "Directories=${dirs%,}"
     for d in ${dirs//,/ }; do
       s=${d%%x*}; echo; echo "[$d]"; echo "Context=Places"; echo "Size=$s"
       case $d in *@2x*) echo "Scale=2" ;; esac; echo "Type=Fixed"
     done
-  } > "$T/index.theme"
-  gtk-update-icon-cache -q -f "$T" 2>/dev/null || true
+  } > "$B/index.theme"
+  gtk-update-icon-cache -q -f "$B" 2>/dev/null || true
+  rm -rf "$T.alt"; [ -d "$T" ] && mv "$T" "$T.alt"
+  mv "$B" "$T" && rm -rf "$T.alt"
 }
 
-RESET=0; [ "${1:-}" = --reset ] && RESET=1
-[ "$RESET" -eq 1 ] || build_theme
+RESET=0
+case "${1:-}" in
+  --reset) RESET=1 ;;
+  --farbe)
+    [ -f "/usr/share/icons/Papirus/64x64/places/folder-${2:-x}.svg" ] \
+      || { echo "Unbekannte Papirus-Farbe: ${2:-}" >&2; exit 1; }
+    COLOR=$2 ;;
+  --auto)
+    hex=${2:-$(cat "$AKZENT" 2>/dev/null)}
+    [ -n "$hex" ] || { echo "Keine Akzentfarbe ($AKZENT)" >&2; exit 1; }
+    neu=$(naechste_farbe "$hex") || exit 1
+    # nur neu bauen, wenn sich die Farbe ändert (Hintergrund ähnlich → nichts tun)
+    [ "$neu" = "$COLOR" ] && [ -f "$T/index.theme" ] && exit 0
+    mkdir -p "$(dirname "$STATE")"; echo "$neu" > "$STATE"; COLOR=$neu
+    build_theme && echo "Ordnerfarbe: $COLOR (Akzent $hex)"
+    exit ;;
+esac
+if [ "$RESET" -eq 0 ]; then
+  build_theme || exit 1
+  mkdir -p "$(dirname "$STATE")"; echo "$COLOR" > "$STATE"
+  # altes, fest magentafarbenes Theme (vor der Umbenennung) aufräumen
+  rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/icons/Papirus-Dark-Magenta"
+fi
 THEME_DIR="$T/64x64/places"
 
 n=0
