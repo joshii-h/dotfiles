@@ -63,7 +63,10 @@ icon() {  # icon <Ordner> <Symbolname>
     return 0
   fi
   file="$THEME_DIR/$name.svg"
-  [ -e "$file" ] || file="/usr/share/icons/Papirus/64x64/places/$name.svg"
+  if [ ! -e "$file" ]; then
+    echo "Hinweis: $name gibt es nicht in $COLOR – nehme die blaue Papirus-Variante ($dir)" >&2
+    file="/usr/share/icons/Papirus/64x64/places/$name.svg"
+  fi
   [ -e "$file" ] || { echo "Symbol fehlt im Theme: $name" >&2; return 0; }
   gio set "$dir" metadata::custom-icon-name "$name"
   gio set "$dir" metadata::custom-icon "file://$(readlink -f "$file")"
@@ -79,9 +82,9 @@ icon "$H/.local/share/ai"               folder-script
 
 # Nextcloud
 icon "$H/Nextcloud/Immeditech"          folder-favorites
-icon "$H/Nextcloud/Photos"              folder-photos
+icon "$H/Nextcloud/Photos"              folder-photo
 icon "$H/Nextcloud/01_Scan"             folder-print
-icon "$H/Nextcloud/03_Lieferscheine"    folder-text
+icon "$H/Nextcloud/03_Lieferscheine"    folder-notes
 icon "$H/Nextcloud/BlueFerry"           folder-sync
 
 # Dokumente
@@ -90,9 +93,9 @@ icon "$H/Documents/Backups"             folder-backup
 icon "$H/Documents/Scan"                folder-print
 
 # Bilder
-icon "$H/Pictures/Screenshots"          folder-camera
-icon "$H/Pictures/Wallpapers"           folder-images
-icon "$H/Pictures/stepshot"             folder-image
+icon "$H/Pictures/Screenshots"          folder-pictures
+icon "$H/Pictures/Wallpapers"           folder-desktop
+icon "$H/Pictures/stepshot"             folder-activities
 
 # Spiele und Videos
 icon "$H/Games/Steam"                   folder-steam
