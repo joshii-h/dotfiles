@@ -2,14 +2,13 @@
 """geraete-akkus — Akkustand kabelloser Geräte als JSON (für das DMS-Plugin „Geräteakkus“).
 
 Quellen, die UPower nicht kennt:
-  - Razer (OpenRazer) über die dankrazer-CLI des Plugins dankRazer
+  - Razer über OpenRazer
   - Headsets über headsetcontrol (z. B. Astro A50)
 iPhone und Bluetooth-Geräte liest das Plugin direkt aus UPower.
 
 Ausgabe: [{"name", "icon", "percent", "charging", "source"}]
 """
 import json
-import os
 import shutil
 import subprocess
 
@@ -24,28 +23,26 @@ def run(cmd):
         return ""
 
 
-# Razer über dankrazer (D-Bus zu openrazer-daemon)
-cfg = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-dankrazer = os.path.join(cfg, "dms/plugins/dankRazer/dankrazer-cli/dankrazer")
-if os.access(dankrazer, os.X_OK):
+# Razer über OpenRazer (openrazer-daemon)
+try:
+    from openrazer.client import DeviceManager
+    razer = list(DeviceManager().devices)
+except Exception:
+    razer = []
+for d in razer:
     try:
-        devs = json.loads(run([dankrazer, "list", "--json"]) or "[]")
-    except json.JSONDecodeError:
-        devs = []
-    if isinstance(devs, dict):
-        devs = devs.get("devices", [])
-    for d in devs:
-        lvl = d.get("battery", d.get("battery_level"))
-        if lvl is None or lvl < 0:
+        if not d.capabilities.get("battery"):
             continue
-        typ = str(d.get("type", "")).lower()
+        typ = str(d.type).lower()
         out.append({
-            "name": d.get("name", "Razer").replace(" (Receiver)", ""),
+            "name": d.name.replace(" (Receiver)", ""),
             "icon": "mouse" if "mouse" in typ else ("keyboard" if "keyboard" in typ else "devices"),
-            "percent": round(lvl),
-            "charging": bool(d.get("charging", d.get("is_charging", False))),
+            "percent": round(d.battery_level),
+            "charging": bool(d.is_charging),
             "source": "openrazer",
         })
+    except Exception:
+        pass  # Maus schläft oder ist ausgeschaltet
 
 # Headsets über headsetcontrol
 if shutil.which("headsetcontrol"):
