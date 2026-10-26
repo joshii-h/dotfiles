@@ -74,6 +74,11 @@ environment {
 spawn-at-startup "dms" "run"
 // Nautilus im Hintergrund: öffnet Fenster sofort
 spawn-at-startup "nautilus" "--gapplication-service"
+// D-Bus-gestartete Dienste (Passwortdialoge, Portale …) brauchen die
+// Wayland-Umgebung – unter systemd macht das niri-session, hier selbst:
+spawn-at-startup "dbus-update-activation-environment" "WAYLAND_DISPLAY" "DISPLAY" "XDG_CURRENT_DESKTOP" "XDG_SESSION_TYPE" "XDG_SESSION_DESKTOP" "NIRI_SOCKET" "SSH_AUTH_SOCK" "QT_QPA_PLATFORMTHEME"
+// SSH-Agent (gcr) am Sitzungs-D-Bus, Socket $XDG_RUNTIME_DIR/gcr/ssh
+spawn-at-startup "sh" "-c" "exec /usr/libexec/gcr-ssh-agent --base-dir \"$XDG_RUNTIME_DIR/gcr\""
 spawn-at-startup "dex" "--autostart" "--environment" "niri"
 
 // VRR nur für Spiele (on-demand), Desktop bleibt fest
