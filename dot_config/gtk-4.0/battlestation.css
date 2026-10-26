@@ -1,0 +1,12 @@
+/* Battlestation: Seitenleisten-Symbole (Nautilus, Nemo, Datei-Dialoge) in der
+   Akzentfarbe aus dem Hintergrundbild statt grau; ausgewählt dunkel. */
+.navigation-sidebar image,
+placessidebar image,
+.sidebar image {
+  color: @accent_bg_color;
+}
+.navigation-sidebar row:selected image,
+placessidebar row:selected image,
+.sidebar row:selected image {
+  color: @accent_fg_color;
+}

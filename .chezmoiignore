@@ -44,6 +44,10 @@ msteams-pwa-handler/**
 .config/xdg-desktop-portal/niri-portals.conf
 .config/matugen/**
 .config/gtk-3.0/bookmarks
+.config/gtk-3.0/gtk.css
+.config/gtk-3.0/battlestation.css
+.config/gtk-4.0/gtk.css
+.config/gtk-4.0/battlestation.css
 .local/share/nautilus/**
 .local/share/nemo/**
 .local/bin/dateimanager-aktion
