@@ -63,6 +63,8 @@ hotkey-overlay { skip-at-startup; }
 environment {
     // Qt-Programme: Aussehen und Farben über qt6ct (Farben liefert DMS/matugen)
     QT_QPA_PLATFORMTHEME "qt6ct"
+    // Terminal für Programme mit Terminal=true (btop, nvim …) im DMS-Starter
+    TERMINAL "kitty"
     ELECTRON_OZONE_PLATFORM_HINT "auto"
 }
 

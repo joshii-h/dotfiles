@@ -21,3 +21,6 @@ export GTK2_RC_FILES="$XDG_CONFIG_HOME/gtk-2.0/gtkrc"
 export CARGO_HOME="$HOME/.cargo"
 . "$HOME/.cargo/env"
 {{- end }}
+
+# Standard-Terminal (für Starter wie DMS, Terminal=true-Programme)
+command -v kitty >/dev/null 2>&1 && export TERMINAL=kitty
