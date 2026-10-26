@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
-# dms-update — aktualisiert Dux Shell (früher DankMaterialShell, Befehl `dms`).
+# dms-update — aktualisiert Dux Shell (früher DankMaterialShell, Befehl `dms`)
+# und den Login-Bildschirm dms-greeter.
 #
-# Holt das neueste Release von duxlabs-dev/dux-shell (die Oberfläche steckt im
-# Programm selbst), prüft die sha256-Summe und ersetzt /usr/local/bin/dms.
+# Holt jeweils das neueste Release (duxlabs-dev/dux-shell bzw. dux-greeter;
+# die Oberfläche steckt im Programm selbst), prüft die sha256-Summe und
+# ersetzt /usr/local/bin/dms bzw. /usr/local/bin/dms-greeter.
 # `dms update` taugt dafür nicht: es erkennt die manuelle Installation nicht.
 # Ist die neueste Version schon installiert, passiert nichts.
 #
@@ -12,9 +14,6 @@
 #
 set -euo pipefail
 
-REPO="duxlabs-dev/dux-shell"
-DEST="/usr/local/bin/dms"
-ASSET="dms-cli-amd64.gz"
 
 FORCE=0
 for arg in "$@"; do
@@ -31,44 +30,49 @@ err()  { printf '\033[1;31mEE\033[0m %s\n' "$*" >&2; }
 for t in curl gunzip sha256sum; do
   command -v "$t" >/dev/null || { err "Benötigtes Tool fehlt: $t"; exit 1; }
 done
-if [ ! -x "$DEST" ]; then
-  info "Dux Shell ist nicht installiert ($DEST fehlt) – nichts zu tun."
-  exit 0
-fi
 
-# Neuester Tag über den Redirect von /releases/latest (kein API-Limit)
-info "Ermittle neueste Dux-Shell-Version ..."
-url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")
-TAG=${url##*/}
-case "$TAG" in v[0-9]*) ;; *) err "Konnte die neueste Version nicht ermitteln (${url})"; exit 1 ;; esac
+# update <Name> <Repo> <Asset> <Ziel>
+update() {
+  local name=$1 repo=$2 asset=$3 dest=$4 url tag cur tmp want have bin
+  if [ ! -x "$dest" ]; then
+    info "$name ist nicht installiert ($dest fehlt) – übersprungen."
+    return 0
+  fi
+  # Neuester Tag über den Redirect von /releases/latest (kein API-Limit)
+  url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest")
+  tag=${url##*/}
+  case "$tag" in v[0-9]*) ;; *) err "$name: neueste Version nicht ermittelbar (${url})"; return 1 ;; esac
 
-CUR=$("$DEST" version 2>/dev/null | grep -oE 'v[0-9][0-9.]*[0-9A-Za-z.-]*' | head -1 || true)
-if [ "$CUR" = "$TAG" ] && [ "$FORCE" -eq 0 ]; then
-  info "Dux Shell ${CUR} ist aktuell."
-  exit 0
-fi
-info "Aktualisiere Dux Shell ${CUR:-?} → ${TAG} ..."
+  cur=$("$dest" version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.-]*' | head -1 || true)
+  cur=v${cur#v}
+  if [ "$cur" = "$tag" ] && [ "$FORCE" -eq 0 ]; then
+    info "$name ${cur} ist aktuell."
+    return 0
+  fi
+  info "Aktualisiere $name ${cur:-?} → ${tag} ..."
 
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-base="https://github.com/${REPO}/releases/download/${TAG}"
-curl -fsSL -o "$TMP/$ASSET" "$base/$ASSET"
-curl -fsSL -o "$TMP/$ASSET.sha256" "$base/$ASSET.sha256"
+  tmp=$(mktemp -d)
+  curl -fsSL -o "$tmp/$asset" "https://github.com/${repo}/releases/download/${tag}/$asset" \
+    && curl -fsSL -o "$tmp/$asset.sha256" "https://github.com/${repo}/releases/download/${tag}/$asset.sha256" \
+    || { err "$name: Download fehlgeschlagen"; rm -rf "$tmp"; return 1; }
+  # Die .sha256-Datei nennt die Datei teils anders – nur den Hash vergleichen.
+  want=$(awk '{print $1; exit}' "$tmp/$asset.sha256")
+  have=$(sha256sum "$tmp/$asset" | awk '{print $1}')
+  if [ -z "$want" ] || [ "$want" != "$have" ]; then
+    err "$name: Prüfsumme stimmt nicht (erwartet ${want:-?}, erhalten ${have}) – nichts ersetzt."
+    rm -rf "$tmp"; return 1
+  fi
+  gunzip "$tmp/$asset"; bin="$tmp/${asset%.gz}"; chmod 755 "$bin"
+  "$bin" version >/dev/null 2>&1 || { err "$name: neues Programm startet nicht – nichts ersetzt."; rm -rf "$tmp"; return 1; }
+  sudo -n install -m755 "$bin" "$dest"
+  rm -rf "$tmp"
+  info "Installiert: $name ${tag}"
+  if [ "$name" = "Dux Shell" ] && pgrep -x dms >/dev/null; then
+    printf '  \033[33m!\033[0m läuft gerade – aktiv nach `dms restart` oder dem nächsten niri-Login\n'
+  fi
+}
 
-# Die .sha256-Datei nennt die Datei teils anders (dms-amd64.gz) – nur den Hash vergleichen.
-want=$(awk '{print $1; exit}' "$TMP/$ASSET.sha256")
-have=$(sha256sum "$TMP/$ASSET" | awk '{print $1}')
-if [ -z "$want" ] || [ "$want" != "$have" ]; then
-  err "Prüfsumme stimmt nicht (erwartet ${want:-?}, erhalten ${have}) – nichts ersetzt."
-  exit 1
-fi
-
-gunzip "$TMP/$ASSET"
-chmod 755 "$TMP/${ASSET%.gz}"
-"$TMP/${ASSET%.gz}" version >/dev/null 2>&1 || { err "Neues Programm startet nicht – nichts ersetzt."; exit 1; }
-sudo -n install -m755 "$TMP/${ASSET%.gz}" "$DEST"
-info "Installiert: Dux Shell ${TAG}"
-
-if pgrep -x dms >/dev/null; then
-  printf '  \033[33m!\033[0m läuft gerade – aktiv nach `dms restart` oder dem nächsten niri-Login\n'
-fi
+rc=0
+update "Dux Shell"   duxlabs-dev/dux-shell   dms-cli-amd64.gz            /usr/local/bin/dms         || rc=1
+update "dms-greeter" duxlabs-dev/dux-greeter dms-greeter-linux-amd64.gz  /usr/local/bin/dms-greeter || rc=1
+exit $rc
