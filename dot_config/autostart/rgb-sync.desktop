@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=RGB-Sync
+Comment=LEDs folgen der Farbpalette des Hintergrundbilds (OpenRGB, OpenRazer, CoolerControl)
+Exec=sh -c 'exec "$HOME/.local/bin/rgb-sync" >"${XDG_STATE_HOME:-$HOME/.local/state}/rgb-sync.log" 2>&1'
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

@@ -1,0 +1,6 @@
+{
+  "primary": "{{colors.primary.dark.hex}}",
+  "tertiary": "{{colors.tertiary.dark.hex}}",
+  "secondary": "{{colors.secondary.dark.hex}}",
+  "source": "{{colors.source_color.default.hex}}"
+}

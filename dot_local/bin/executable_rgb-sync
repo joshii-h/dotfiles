@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""rgb-sync — alle LEDs folgen der Farbpalette des Hintergrundbilds, mit Überblendung.
+
+Liest die Palette, die matugen bei jedem Hintergrundwechsel nach
+~/.cache/matugen/rgb-palette.json schreibt (Akzent, Tertiär, Sekundär), macht
+daraus kräftige LED-Farben (die Theme-Farben im dunklen Modus sind Pastelltöne
+und wirken auf LEDs fast weiß) und verteilt sie so:
+
+  - OpenRGB (Ducky Shine 7, RGB-RAM): weiche Überblendung per Software
+  - OpenRazer (Basilisk Ultimate, Dock): dieselbe Überblendung, alle Zonen;
+    lädt die Maus im Dock, bleibt ihre eigene Ladeanzeige stehen
+  - CoolerControl (H150i, Lighting Node Core, Mainboard): nur bei
+    Palettenwechsel – color_shift in der Hardware, wo es geht (Lüfter),
+    sonst feste Akzentfarbe. Jede Änderung dort schreibt CoolerControls
+    Konfiguration, daher keine Software-Animation.
+
+CoolerControl, OpenRazer und der OpenRGB-Server dürfen später starten oder
+neu starten; rgb-sync verbindet sich dann neu.
+
+  rgb-sync            # Dienst (Autostart)
+  rgb-sync --setup    # venv mit openrgb-python anlegen (einmalig)
+  rgb-sync --once     # Palette einmal anwenden (ohne Animation) und beenden
+"""
+import colorsys
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.request
+
+HOME = os.path.expanduser("~")
+DATA = os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local/share"))
+CFG = os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config"))
+CACHE = os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache"))
+VENV = os.path.join(DATA, "rgb-sync/venv")
+PALETTE = os.path.join(CACHE, "matugen/rgb-palette.json")
+CC_API = "http://localhost:11987"
+CC_TOKEN = os.path.join(CFG, "coolercontrol/token")
+
+FADE = 6.0       # Sekunden Überblendung zur nächsten Farbe
+HOLD = 3.0       # Sekunden auf jeder Farbe stehen bleiben
+FPS = 20         # Bilder pro Sekunde für OpenRGB
+RAZER_FPS = 4    # Funkmaus: seltener schreiben (Akku, Funkstrecke)
+
+if "--setup" in sys.argv:
+    subprocess.run([sys.executable, "-m", "venv", "--system-site-packages", VENV], check=True)
+    subprocess.run([os.path.join(VENV, "bin/pip"), "install", "-q", "--disable-pip-version-check",
+                    "openrgb-python"], check=True)
+    print("venv bereit:", VENV)
+    sys.exit(0)
+
+# in die venv wechseln (openrgb-python ist nicht in Gentoo paketiert)
+vpy = os.path.join(VENV, "bin/python")
+if sys.prefix == sys.base_prefix and os.path.exists(vpy):
+    os.execv(vpy, [vpy] + sys.argv)
+
+try:
+    from openrgb import OpenRGBClient
+    from openrgb.utils import RGBColor
+except ImportError:
+    sys.exit("openrgb-python fehlt – einmal `rgb-sync --setup` ausführen")
+
+
+def log(*a):
+    print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+# ---------- Farben ----------
+
+def hex2rgb(h):
+    h = h.strip().lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def vivid(rgb):
+    """Pastell → kräftig: Farbton behalten, Sättigung hoch, volle Helligkeit."""
+    h, s, v = colorsys.rgb_to_hsv(*(c / 255 for c in rgb))
+    if s < 0.08:            # Grau/Weiß bleibt neutral
+        return (h, 0.0, 1.0)
+    return (h, max(s, 0.9), 1.0)
+
+
+def hue_dist(a, b):
+    d = abs(a - b) % 1.0
+    return min(d, 1 - d)
+
+
+def load_palette():
+    try:
+        p = json.load(open(PALETTE))
+    except (OSError, json.JSONDecodeError):
+        return [(0.0, 0.0, 1.0)]
+    cols = []
+    for key in ("primary", "tertiary", "secondary"):
+        if key in p:
+            c = vivid(hex2rgb(p[key]))
+            if all(hue_dist(c[0], o[0]) > 0.055 or (c[1] == 0) != (o[1] == 0) for o in cols):
+                cols.append(c)
+    if len(cols) == 1 and cols[0][1] > 0:   # nur ein Farbton: Nachbarton dazu
+        h, s, v = cols[0]
+        cols.append(((h + 0.1) % 1.0, s, v))
+    return cols
+
+
+def hsv2rgb(c):
+    return tuple(round(x * 255) for x in colorsys.hsv_to_rgb(*c))
+
+
+def mix(a, b, t):
+    """Überblendung über den kürzeren Weg im Farbkreis (bleibt kräftig)."""
+    t = t * t * (3 - 2 * t)                 # weich ein- und ausblenden
+    dh = (b[0] - a[0]) % 1.0
+    if dh > 0.5:
+        dh -= 1.0
+    return ((a[0] + dh * t) % 1.0, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
+
+
+def color_at(cols, now):
+    if len(cols) == 1:
+        return cols[0]
+    seg = FADE + HOLD
+    pos = now % (seg * len(cols))
+    i = int(pos // seg)
+    t = pos - i * seg
+    a, b = cols[i], cols[(i + 1) % len(cols)]
+    return a if t < HOLD else mix(a, b, (t - HOLD) / FADE)
+
+
+# ---------- OpenRGB ----------
+
+class OpenRGB:
+    def __init__(self):
+        self.client, self.devs, self.next_try = None, [], 0
+
+    def connect(self):
+        if self.client or time.time() < self.next_try:
+            return
+        try:
+            self.client = OpenRGBClient("127.0.0.1", 6742, "rgb-sync")
+            self.devs = []
+            for d in self.client.devices:
+                names = [m.name.lower() for m in d.modes]
+                if "direct" in names:
+                    d.set_mode("direct")
+                elif "static" in names:
+                    d.set_mode("static")
+                self.devs.append(d)
+            log("OpenRGB:", ", ".join(d.name for d in self.devs) or "keine Geräte")
+        except Exception as e:
+            self.client, self.next_try = None, time.time() + 10
+            log("OpenRGB nicht erreichbar:", e)
+
+    def show(self, rgb):
+        self.connect()
+        if not self.client:
+            return
+        try:
+            for d in self.devs:
+                d.set_color(RGBColor(*rgb), fast=True)
+        except Exception as e:
+            log("OpenRGB-Verbindung verloren:", e)
+            self.client, self.next_try = None, time.time() + 5
+
+
+# ---------- OpenRazer ----------
+
+ZONES = {"logo": "logo", "scroll": "scroll_wheel", "left": "left", "right": "right",
+         "backlight": "backlight"}
+
+
+class Razer:
+    def __init__(self):
+        self.devs, self.next_try = None, 0
+        self.charging, self.charge_check = {}, 0
+
+    def update_charging(self):
+        """Ladende Geräte (Maus im Dock) behalten ihre eigene Ladeanzeige."""
+        if time.time() < self.charge_check:
+            return
+        self.charge_check = time.time() + 10
+        for d in self.devs or []:
+            try:
+                self.charging[d.serial] = bool(d.capabilities.get("battery") and d.is_charging)
+            except Exception:
+                self.charging[d.serial] = False
+
+    def connect(self):
+        if self.devs is not None or time.time() < self.next_try:
+            return
+        try:
+            from openrazer.client import DeviceManager
+            self.devs = list(DeviceManager().devices)
+            for d in self.devs:
+                caps = d.capabilities
+                if caps.get("brightness"):
+                    d.brightness = 100
+                for z, attr in ZONES.items():
+                    if caps.get(f"lighting_{z}_brightness"):
+                        getattr(d.fx.misc, attr).brightness = 100
+            log("OpenRazer:", ", ".join(d.name for d in self.devs) or "keine Geräte")
+        except Exception as e:
+            self.devs, self.next_try = None, time.time() + 15
+            log("OpenRazer nicht erreichbar:", e)
+
+    def show(self, rgb):
+        self.connect()
+        self.update_charging()
+        for d in self.devs or []:
+            if self.charging.get(d.serial):
+                continue
+            caps = d.capabilities
+            try:
+                if caps.get("lighting_static"):
+                    d.fx.static(*rgb)
+                for z, attr in ZONES.items():
+                    if caps.get(f"lighting_{z}_static"):
+                        getattr(d.fx.misc, attr).static(*rgb)
+            except Exception:
+                # Maus schläft oder Daemon neu gestartet: später neu verbinden
+                self.devs, self.next_try = None, time.time() + 15
+                return
+
+
+# ---------- CoolerControl ----------
+
+def cc_apply(cols):
+    """True, wenn alles gesetzt wurde (sonst später erneut versuchen)."""
+    try:
+        token = open(CC_TOKEN).read().strip()
+    except OSError:
+        return True   # kein Token: CoolerControl-Teil abgeschaltet
+
+    def call(method, path, body=None):
+        req = urllib.request.Request(CC_API + path, method=method,
+                                     data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Authorization": "Bearer " + token,
+                                              "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else None
+
+    rgbs = [list(hsv2rgb(c)) for c in cols]
+    try:
+        for dev in call("GET", "/devices").get("devices", []):
+            for ch, info in (dev.get("info") or {}).get("channels", {}).items():
+                modes = {m.get("name"): m for m in (info or {}).get("lighting_modes") or []}
+                if "color_shift" in modes and len(rgbs) >= 2:
+                    body = {"mode": "color_shift", "speed": "slower", "colors": rgbs[:2]}
+                elif "fixed" in modes:
+                    body = {"mode": "fixed", "colors": [rgbs[0]]}
+                else:
+                    continue
+                call("PUT", f"/devices/{dev['uid']}/settings/{ch}/lighting", body)
+        log("CoolerControl gesetzt:", ["#%02x%02x%02x" % tuple(c) for c in rgbs])
+        return True
+    except Exception as e:
+        log("CoolerControl nicht erreichbar:", e)
+        return False
+
+
+# ---------- Hauptschleife ----------
+
+def main():
+    orgb, razer = OpenRGB(), Razer()
+    cols = load_palette()
+    if "--once" in sys.argv:
+        rgb = hsv2rgb(cols[0])
+        orgb.show(rgb)
+        razer.show(rgb)
+        cc_apply(cols)
+        return
+
+    mtime = os.path.getmtime(PALETTE) if os.path.exists(PALETTE) else 0
+    cc_ok = cc_apply(cols)
+    cc_retry = time.time() + 30
+    last_razer, last_rgb = 0.0, None
+    log("Palette:", ["#%02x%02x%02x" % hsv2rgb(c) for c in cols])
+
+    while True:
+        now = time.time()
+        # Palettenwechsel (neues Hintergrundbild) erkennen
+        try:
+            m = os.path.getmtime(PALETTE)
+        except OSError:
+            m = mtime
+        if m != mtime:
+            time.sleep(0.3)            # matugen schreibt gerade
+            mtime, cols = m, load_palette()
+            log("Neue Palette:", ["#%02x%02x%02x" % hsv2rgb(c) for c in cols])
+            cc_ok = cc_apply(cols)
+            cc_retry = now + 30
+        elif not cc_ok and now > cc_retry:
+            cc_ok, cc_retry = cc_apply(cols), now + 30
+
+        rgb = hsv2rgb(color_at(cols, now))
+        if rgb != last_rgb:
+            orgb.show(rgb)
+            if now - last_razer >= 1 / RAZER_FPS:
+                razer.show(rgb)
+                last_razer = now
+            last_rgb = rgb
+        time.sleep(1 / FPS)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

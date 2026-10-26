@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=OpenRGB-Server
-Comment=SDK-Server für das DMS-Plugin „OpenRGB Theme Sync“ (Tastatur, RAM)
+Comment=SDK-Server für rgb-sync (Tastatur, RAM)
 Exec=openrgb --server
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

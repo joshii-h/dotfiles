@@ -48,9 +48,9 @@ msteams-pwa-handler/**
 .config/dms/plugins/**
 .config/autostart/openrazer-daemon.desktop
 .config/autostart/openrgb-server.desktop
+.config/autostart/rgb-sync.desktop
 .local/bin/geraete-akkus
-.local/bin/rgb-razer
-.local/bin/rgb-coolercontrol
+.local/bin/rgb-sync
 .config/gtk-3.0/bookmarks
 .config/gtk-3.0/gtk.css
 .config/gtk-3.0/battlestation.css
