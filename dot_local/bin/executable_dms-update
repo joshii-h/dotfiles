@@ -11,15 +11,20 @@
 #
 #   dms-update           # neueste Version installieren (falls neuer)
 #   dms-update --force   # neu installieren, auch wenn schon aktuell
+#   dms-update --fonts   # nur Google Sans Flex aus der laufenden Shell übernehmen
+#
+# Google Sans Flex (OFL) bringt die Shell nur für sich selbst mit; eine Kopie
+# in ~/.local/share/fonts macht sie auch für GTK, Qt und fontconfig nutzbar.
 #
 set -euo pipefail
 
 
-FORCE=0
+FORCE=0; ONLY_FONTS=0
 for arg in "$@"; do
   case "$arg" in
     --force)   FORCE=1 ;;
-    -h|--help) sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --fonts)   ONLY_FONTS=1 ;;
+    -h|--help) sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) printf '\033[1;31mEE\033[0m Unbekannte Option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -72,7 +77,25 @@ update() {
   fi
 }
 
+# Google Sans Flex aus der entpackten Shell kopieren (nur wenn neu/anders).
+# Die Shell entpackt sich beim Start nach /run/user/$UID/dms-shell/<hash>/.
+sync_fonts() {
+  local src dst=${XDG_DATA_HOME:-$HOME/.local/share}/fonts/google-sans-flex
+  src=$(ls -td /run/user/"$(id -u)"/dms-shell/*/DCommon/assets/fonts/google-sans-flex 2>/dev/null | head -1 || true)
+  if [ -z "$src" ] || [ ! -f "$src/GoogleSansFlex.ttf" ]; then
+    info "Google Sans Flex: Shell läuft nicht – übersprungen."; return 0
+  fi
+  cmp -s "$src/GoogleSansFlex.ttf" "$dst/GoogleSansFlex.ttf" && return 0
+  mkdir -p "$dst"
+  install -m644 "$src/GoogleSansFlex.ttf" "$src/OFL.txt" "$dst/"
+  fc-cache -f "$dst" >/dev/null 2>&1 || true
+  info "Google Sans Flex übernommen ($dst)"
+}
+
+if [ "$ONLY_FONTS" -eq 1 ]; then sync_fonts; exit 0; fi
+
 rc=0
 update "Dux Shell"   duxlabs-dev/dux-shell   dms-cli-amd64.gz            /usr/local/bin/dms         || rc=1
 update "dms-greeter" duxlabs-dev/dux-greeter dms-greeter-linux-amd64.gz  /usr/local/bin/dms-greeter || rc=1
+sync_fonts || rc=1
 exit $rc
