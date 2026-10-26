@@ -27,7 +27,9 @@ build_theme() {  # Verweise auf die $COLOR-Varianten von Papirus anlegen
     mkdir -p "$T/$size/places"
     for l in "$src"/*.svg; do
       [ -L "$l" ] || continue
-      tgt=$(readlink "$l")
+      # ganze Verweiskette auflösen (z. B. folder-desktop → user-desktop →
+      # user-blue-desktop) und die Datei in $COLOR daneben suchen
+      tgt=$(basename "$(readlink -f "$l")")
       case "$tgt" in *-blue*) ;; *) continue ;; esac
       new=${tgt/-blue/-$COLOR}; nf="$(dirname "$(readlink -f "$l")")/$new"
       # echte Kopie statt Verweis: Flatpaks sehen /usr/share/icons unter
@@ -84,7 +86,7 @@ icon "$H/.local/share/ai"               folder-script
 icon "$H/Nextcloud/Immeditech"          folder-favorites
 icon "$H/Nextcloud/Photos"              folder-photo
 icon "$H/Nextcloud/01_Scan"             folder-print
-icon "$H/Nextcloud/03_Lieferscheine"    folder-notes
+icon "$H/Nextcloud/03_Lieferscheine"    folder-documents
 icon "$H/Nextcloud/BlueFerry"           folder-sync
 
 # Dokumente
