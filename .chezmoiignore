@@ -47,7 +47,6 @@ msteams-pwa-handler/**
 .config/fontconfig/**
 .config/dms/plugins/**
 .config/autostart/openrazer-daemon.desktop
-.config/autostart/openrgb-server.desktop
 .config/autostart/rgb-sync.desktop
 .local/bin/geraete-akkus
 .local/bin/rgb-sync

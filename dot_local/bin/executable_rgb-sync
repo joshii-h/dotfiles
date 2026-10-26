@@ -7,7 +7,8 @@ daraus kräftige LED-Farben (die Theme-Farben im dunklen Modus sind Pastelltöne
 und wirken auf LEDs fast weiß) und verteilt sie so:
 
   - OpenRGB (Ducky Shine 7, RGB-RAM, H150i, Lighting Node Core, Mainboard):
-    weiche Überblendung per Software
+    weiche Überblendung per Software; rgb-sync startet den OpenRGB-Server
+    selbst und startet ihn neu, wenn ein USB-Gerät eingesteckt wird
   - OpenRazer (Basilisk Ultimate, Dock): dieselbe Überblendung, alle Zonen;
     lädt die Maus im Dock, bleibt ihre eigene Ladeanzeige stehen
 
@@ -128,11 +129,69 @@ ZONE_SIZES = {"Corsair Channel 1": 204, "Corsair Channel 2": 204,   # Lighting N
               "D_LED1": 60, "D_LED2": 60}                           # Mainboard-ARGB
 
 
+SERVER_LOG = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.join(HOME, ".local/state")),
+                          "openrgb-server.log")
+
+
 class OpenRGB:
+    """Verwaltet auch den OpenRGB-Server: startet ihn, wenn er fehlt oder
+    abstürzt, und startet ihn neu, wenn ein USB-Gerät eingesteckt wird – der
+    Server sucht Geräte nur beim Start (sein Rescan-Befehl stürzt ab, wenn
+    gleichzeitig Farben gesendet werden)."""
+
     def __init__(self):
         self.client, self.devs, self.next_try, self.recheck = None, [], 0, 0
+        self.restart_at = 0
+        self.watch_hotplug()
+
+    def watch_hotplug(self):
+        try:
+            import pyudev
+        except ImportError:
+            log("pyudev fehlt – eingesteckte Geräte erst nach Neustart des Servers")
+            return
+        mon = pyudev.Monitor.from_netlink(pyudev.Context())
+        mon.filter_by("hidraw")
+
+        def event(dev):
+            if dev.action == "add":
+                # kurz warten, bis alle Schnittstellen des Geräts da sind
+                self.restart_at = time.time() + 3
+        pyudev.MonitorObserver(mon, callback=event, daemon=True).start()
+
+    def server_running(self):
+        return subprocess.run(["pgrep", "-x", "openrgb"], capture_output=True).returncode == 0
+
+    def start_server(self):
+        log("starte OpenRGB-Server")
+        with open(SERVER_LOG, "ab") as f:
+            subprocess.Popen(["openrgb", "--server"], stdout=f, stderr=f,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+        self.next_try = time.time() + 12   # Gerätesuche abwarten (I2C, USB)
+
+    def restart_server(self):
+        log("Gerät eingesteckt – OpenRGB-Server neu starten")
+        self.drop()
+        subprocess.run(["pkill", "-x", "openrgb"])
+        for _ in range(30):
+            if not self.server_running():
+                break
+            time.sleep(0.2)
+        self.start_server()
+
+    def drop(self):
+        if self.client:
+            try:
+                self.client.disconnect()
+            except Exception:
+                pass
+        self.client, self.devs = None, []
 
     def connect(self):
+        if self.restart_at and time.time() > self.restart_at:
+            self.restart_at = 0
+            self.restart_server()
+            return
         # Server sucht nach dem Start noch Geräte, oder es kam eines dazu
         # (z. B. RAM nach `modprobe i2c-dev`): regelmäßig neu verbinden
         if self.client and (not self.devs or time.time() > self.recheck):
@@ -176,7 +235,10 @@ class OpenRGB:
             log("OpenRGB:", ", ".join(d.name for d in self.devs) or "keine Geräte")
         except Exception as e:
             self.client, self.next_try = None, time.time() + 10
-            log("OpenRGB nicht erreichbar:", e)
+            if not self.server_running():
+                self.start_server()
+            else:
+                log("OpenRGB nicht erreichbar:", e)
 
     def show(self, rgb):
         self.connect()
