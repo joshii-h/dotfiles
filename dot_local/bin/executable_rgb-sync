@@ -6,20 +6,18 @@ Liest die Palette, die matugen bei jedem Hintergrundwechsel nach
 daraus kräftige LED-Farben (die Theme-Farben im dunklen Modus sind Pastelltöne
 und wirken auf LEDs fast weiß) und verteilt sie so:
 
-  - OpenRGB (Ducky Shine 7, RGB-RAM): weiche Überblendung per Software
+  - OpenRGB (Ducky Shine 7, RGB-RAM, H150i, Lighting Node Core, Mainboard):
+    weiche Überblendung per Software
   - OpenRazer (Basilisk Ultimate, Dock): dieselbe Überblendung, alle Zonen;
     lädt die Maus im Dock, bleibt ihre eigene Ladeanzeige stehen
-  - CoolerControl (H150i, Lighting Node Core, Mainboard): nur bei
-    Palettenwechsel – color_shift in der Hardware, wo es geht (Lüfter),
-    sonst feste Akzentfarbe. Jede Änderung dort schreibt CoolerControls
-    Konfiguration, daher keine Software-Animation.
 
-CoolerControl, OpenRazer und der OpenRGB-Server dürfen später starten oder
-neu starten; rgb-sync verbindet sich dann neu.
+OpenRazer und der OpenRGB-Server dürfen später starten oder neu starten;
+rgb-sync verbindet sich dann neu. Lüfterkurve und Pumpe der H150i setzt
+/usr/local/sbin/h150i-init (liquidctl) beim Booten und nach dem Standby.
 
   rgb-sync            # Dienst (Autostart)
   rgb-sync --setup    # venv mit openrgb-python anlegen (einmalig)
-  rgb-sync --once     # OpenRGB und CoolerControl einmal setzen (ohne Animation)
+  rgb-sync --once     # OpenRGB einmal setzen (ohne Animation)
 """
 import colorsys
 import json
@@ -28,16 +26,12 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 
 HOME = os.path.expanduser("~")
 DATA = os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local/share"))
-CFG = os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config"))
 CACHE = os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache"))
 VENV = os.path.join(DATA, "rgb-sync/venv")
 PALETTE = os.path.join(CACHE, "matugen/rgb-palette.json")
-CC_API = "http://localhost:11987"
-CC_TOKEN = os.path.join(CFG, "coolercontrol/token")
 
 FADE = 6.0       # Sekunden Überblendung zur nächsten Farbe
 HOLD = 3.0       # Sekunden auf jeder Farbe stehen bleiben
@@ -129,6 +123,11 @@ def color_at(cols, now):
 
 # ---------- OpenRGB ----------
 
+# LED-Zahl für Zonen, die OpenRGB nicht selbst kennt
+ZONE_SIZES = {"Corsair Channel 1": 204, "Corsair Channel 2": 204,   # Lighting Node Core
+              "D_LED1": 60, "D_LED2": 60}                           # Mainboard-ARGB
+
+
 class OpenRGB:
     def __init__(self):
         self.client, self.devs, self.next_try, self.recheck = None, [], 0, 0
@@ -154,6 +153,17 @@ class OpenRGB:
             return
         try:
             self.client = OpenRGBClient("127.0.0.1", 6742, "rgb-sync")
+            # Zonen mit unbekannter LED-Zahl (Lighting Node, ARGB-Anschlüsse) meldet
+            # OpenRGB mit 0 LEDs und schickt dann nichts – auf das Maximum setzen;
+            # überzählige Daten ignoriert der Controller
+            resized = False
+            for d in self.client.devices:
+                for z in d.zones:
+                    if not z.leds and z.name in ZONE_SIZES:
+                        z.resize(ZONE_SIZES[z.name])
+                        resized = True
+            if resized:
+                self.client.update()
             self.devs = []
             for d in self.client.devices:
                 names = [m.name.lower() for m in d.modes]
@@ -259,43 +269,6 @@ class Razer:
                 return
 
 
-# ---------- CoolerControl ----------
-
-def cc_apply(cols):
-    """True, wenn alles gesetzt wurde (sonst später erneut versuchen)."""
-    try:
-        token = open(CC_TOKEN).read().strip()
-    except OSError:
-        return True   # kein Token: CoolerControl-Teil abgeschaltet
-
-    def call(method, path, body=None):
-        req = urllib.request.Request(CC_API + path, method=method,
-                                     data=json.dumps(body).encode() if body is not None else None,
-                                     headers={"Authorization": "Bearer " + token,
-                                              "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
-
-    rgbs = [list(hsv2rgb(c)) for c in cols]
-    try:
-        for dev in call("GET", "/devices").get("devices", []):
-            for ch, info in (dev.get("info") or {}).get("channels", {}).items():
-                modes = {m.get("name"): m for m in (info or {}).get("lighting_modes") or []}
-                if "color_shift" in modes and len(rgbs) >= 2:
-                    body = {"mode": "color_shift", "speed": "slower", "colors": rgbs[:2]}
-                elif "fixed" in modes:
-                    body = {"mode": "fixed", "colors": [rgbs[0]]}
-                else:
-                    continue
-                call("PUT", f"/devices/{dev['uid']}/settings/{ch}/lighting", body)
-        log("CoolerControl gesetzt:", ["#%02x%02x%02x" % tuple(c) for c in rgbs])
-        return True
-    except Exception as e:
-        log("CoolerControl nicht erreichbar:", e)
-        return False
-
-
 # ---------- Hauptschleife ----------
 
 def main():
@@ -304,12 +277,9 @@ def main():
     orgb, razer = OpenRGB(), Razer(state)
     if "--once" in sys.argv:
         orgb.show(hsv2rgb(cols[0]))
-        cc_apply(cols)
         return
 
     mtime = os.path.getmtime(PALETTE) if os.path.exists(PALETTE) else 0
-    cc_ok = cc_apply(cols)
-    cc_retry = time.time() + 30
     last_rgb = None
     log("Palette:", ["#%02x%02x%02x" % hsv2rgb(c) for c in cols])
 
@@ -325,10 +295,6 @@ def main():
             mtime, cols = m, load_palette()
             state["cols"] = cols
             log("Neue Palette:", ["#%02x%02x%02x" % hsv2rgb(c) for c in cols])
-            cc_ok = cc_apply(cols)
-            cc_retry = now + 30
-        elif not cc_ok and now > cc_retry:
-            cc_ok, cc_retry = cc_apply(cols), now + 30
 
         razer.ensure()
         rgb = hsv2rgb(color_at(cols, now))
