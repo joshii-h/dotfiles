@@ -1,0 +1,14 @@
+{
+    "id": "geraeteAkkus",
+    "name": "Geräteakkus",
+    "description": "Akkustand von Handy, Bluetooth-Geräten, Razer-Maus und Headset in einer Anzeige, mit Warnung bei niedrigem Stand",
+    "version": "1.0.0",
+    "author": "joshii",
+    "icon": "battery_full",
+    "type": "widget",
+    "capabilities": ["dankbar-widget", "monitoring"],
+    "component": "./GeraeteAkkus.qml",
+    "requires": ["python3"],
+    "permissions": ["settings_read", "process"],
+    "license": "MIT"
+}

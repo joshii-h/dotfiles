@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""geraete-akkus — Akkustand kabelloser Geräte als JSON (für das DMS-Plugin „Geräteakkus“).
+
+Quellen, die UPower nicht kennt:
+  - Razer (OpenRazer) über die dankrazer-CLI des Plugins dankRazer
+  - Headsets über headsetcontrol (z. B. Astro A50)
+iPhone und Bluetooth-Geräte liest das Plugin direkt aus UPower.
+
+Ausgabe: [{"name", "icon", "percent", "charging", "source"}]
+"""
+import json
+import os
+import shutil
+import subprocess
+
+out = []
+
+
+def run(cmd):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        return r.stdout if r.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+# Razer über dankrazer (D-Bus zu openrazer-daemon)
+cfg = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+dankrazer = os.path.join(cfg, "dms/plugins/dankRazer/dankrazer-cli/dankrazer")
+if os.access(dankrazer, os.X_OK):
+    try:
+        devs = json.loads(run([dankrazer, "list", "--json"]) or "[]")
+    except json.JSONDecodeError:
+        devs = []
+    if isinstance(devs, dict):
+        devs = devs.get("devices", [])
+    for d in devs:
+        lvl = d.get("battery", d.get("battery_level"))
+        if lvl is None or lvl < 0:
+            continue
+        typ = str(d.get("type", "")).lower()
+        out.append({
+            "name": d.get("name", "Razer").replace(" (Receiver)", ""),
+            "icon": "mouse" if "mouse" in typ else ("keyboard" if "keyboard" in typ else "devices"),
+            "percent": round(lvl),
+            "charging": bool(d.get("charging", d.get("is_charging", False))),
+            "source": "openrazer",
+        })
+
+# Headsets über headsetcontrol
+if shutil.which("headsetcontrol"):
+    try:
+        data = json.loads(run(["headsetcontrol", "-b", "-o", "json"]) or "{}")
+    except json.JSONDecodeError:
+        data = {}
+    for d in data.get("devices", []):
+        b = d.get("battery") or {}
+        status = b.get("status", "")
+        if status not in ("BATTERY_AVAILABLE", "BATTERY_CHARGING"):
+            continue
+        out.append({
+            "name": d.get("device") or d.get("product") or "Headset",
+            "icon": "headphones",
+            "percent": int(b.get("level", 0)),
+            "charging": status == "BATTERY_CHARGING",
+            "source": "headsetcontrol",
+        })
+
+print(json.dumps(out, ensure_ascii=False))
