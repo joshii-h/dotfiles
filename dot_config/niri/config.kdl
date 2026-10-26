@@ -15,7 +15,7 @@ input {
     mouse {
         accel-profile "flat"
     }
-    warp-mouse-to-focus
+    // warp-mouse-to-focus: Maus sprang beim Fokuswechsel per Tastatur mit (lästig)
 }
 
 // Anordnung wie unter KDE. Desktop mit 60 Hz – refresh-switch schaltet bei
