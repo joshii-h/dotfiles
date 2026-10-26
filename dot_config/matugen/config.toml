@@ -22,9 +22,9 @@ output_path = "~/.config/mpv/dms-uosc.conf"
 input_path = "~/.config/matugen/templates/starship.toml"
 output_path = "~/.config/starship.toml"
 
-# Akzentfarbe für die Papirus-Ordner: ordner-symbole wählt die nächstliegende
-# Papirus-Farbe und baut „Papirus-Dark-Akzent“ nur bei Farbwechsel neu.
+# Akzentfarbe für die Papirus-Ordner (ordner-symbole wählt die nächstliegende
+# Papirus-Farbe, baut nur bei Farbwechsel neu) die Razer-LEDs (rgb-razer) und die Corsair-LEDs über CoolerControl (rgb-coolercontrol).
 [templates.ordnerfarbe]
 input_path = "~/.config/matugen/templates/akzent.txt"
 output_path = "~/.cache/matugen/akzent"
-post_hook = 'sh -c "$HOME/.local/bin/ordner-symbole --auto >/dev/null 2>&1 &"'
+post_hook = 'sh -c "($HOME/.local/bin/ordner-symbole --auto; $HOME/.local/bin/rgb-razer; $HOME/.local/bin/rgb-coolercontrol) >/dev/null 2>&1 &"'
