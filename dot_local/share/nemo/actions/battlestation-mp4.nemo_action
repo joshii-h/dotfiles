@@ -1,0 +1,7 @@
+[Nemo Action]
+Name=In MP4 umwandeln
+Comment=MeshCentral-Aufzeichnung in MP4 umwandeln
+Exec=dateimanager-aktion mp4 %F
+Icon-Name=video-x-generic
+Selection=notnone
+Extensions=mcrec;

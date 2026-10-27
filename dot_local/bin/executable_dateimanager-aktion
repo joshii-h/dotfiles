@@ -8,6 +8,7 @@
 #   code       in VS Code öffnen               pfad     Pfad kopieren
 #   hintergrund  Bild als Hintergrund (DMS)    ocr      durchsuchbares PDF
 #   ncdu       Speicherbelegung anzeigen       sha256   SHA-256 kopieren
+#   mp4        MeshCentral-.mcrec in MP4 umwandeln (mcrec2mp4)
 #
 set -u
 aktion=${1:-}; shift || true
@@ -34,6 +35,10 @@ case "$aktion" in
   hintergrund) dms ipc call wallpaper set "$first" >/dev/null && note "Hintergrund gesetzt" "$(basename -- "$first")" ;;
   ocr)         exec ocr-file "${paths[@]}" ;;
   ncdu)        exec kitty -e ncdu "$(dir_of "$first")" ;;
+  mp4)         recs=(); for p in "${paths[@]}"; do case "$p" in *.mcrec) recs+=("$p") ;; esac; done
+               if [ ${#recs[@]} -eq 0 ]; then note "Keine .mcrec-Datei ausgewählt"; exit 1; fi
+               note "Umwandlung läuft …" "${#recs[@]} Aufzeichnung(en)"
+               exec mcrec2mp4 --notify "${recs[@]}" ;;
   sha256)      h=$(sha256sum -- "$first" | cut -d' ' -f1); printf '%s' "$h" | wl-copy; note "SHA-256 kopiert" "$h" ;;
   *)           echo "Unbekannte Aktion: $aktion" >&2; exit 2 ;;
 esac
