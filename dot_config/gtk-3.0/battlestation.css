@@ -1,12 +1,21 @@
-/* Battlestation: Seitenleisten-Symbole (Nautilus, Nemo, Datei-Dialoge) in der
-   Akzentfarbe aus dem Hintergrundbild statt grau; ausgewählt dunkel. */
-.navigation-sidebar image,
-placessidebar image,
-.sidebar image {
+/* Battlestation: Symbole überall in der Akzentfarbe aus dem Hintergrundbild
+   statt in Textfarbe (Kopfleisten, Tabs, Buttons, Seitenleisten, Listen).
+   Nur symbolische Icons reagieren auf `color`, farbige App-Icons bleiben. */
+image {
   color: @accent_bg_color;
 }
-.navigation-sidebar row:selected image,
-placessidebar row:selected image,
-.sidebar row:selected image {
+
+/* Vollflächig farbige Buttons (z. B. Senden): Vordergrundfarbe des Buttons,
+   sonst verschwindet das Symbol. Ausgewählte Zeilen sind nur leicht getönt,
+   dort bleibt der Akzent lesbar. OSD-Leisten behalten ihre helle Farbe. */
+.suggested-action image {
   color: @accent_fg_color;
+}
+
+.destructive-action image {
+  color: @destructive_fg_color;
+}
+
+.osd image {
+  color: inherit;
 }
