@@ -11,6 +11,8 @@ und wirken auf LEDs fast weiß) und verteilt sie so:
     selbst und startet ihn neu, wenn ein USB-Gerät eingesteckt wird
   - OpenRazer (Basilisk Ultimate, Dock): dieselbe Überblendung, alle Zonen;
     lädt die Maus im Dock, bleibt ihre eigene Ladeanzeige stehen
+  - Funkmaus (Akku): ohne Überblendung, ein Befehl je Farbwechsel, und nur
+    solange sie benutzt wird – sonst hält der Funk sie wach und leert den Akku
 
 OpenRazer und der OpenRGB-Server dürfen später starten oder neu starten;
 rgb-sync verbindet sich dann neu. Lüfterkurve und Pumpe der H150i setzt
@@ -120,6 +122,16 @@ def color_at(cols, now):
     t = pos - i * seg
     a, b = cols[i], cols[(i + 1) % len(cols)]
     return a if t < HOLD else mix(a, b, (t - HOLD) / FADE)
+
+
+def color_step(cols, now):
+    """Wie color_at, aber ohne Überblendung: springt mitten in der Überblendung
+    zur nächsten Farbe (für die Funkmaus – ein Befehl je Farbe statt ~20)."""
+    if len(cols) == 1:
+        return cols[0]
+    seg = FADE + HOLD
+    pos = (now - HOLD - FADE / 2) % (seg * len(cols))
+    return cols[(int(pos // seg) + 1) % len(cols)]
 
 
 # ---------- OpenRGB ----------
@@ -264,6 +276,11 @@ BRIGHTNESS = {"Razer Mouse Dock": 40}
 RAZER_LEAD = {"Razer Basilisk Ultimate (Receiver)": 0.0, "Razer Mouse Dock": 1.25}
 # Mindestabstand zwischen zwei Farbwechseln (Funkstrecke nicht überfahren)
 RAZER_MIN_INTERVAL = {"Razer Basilisk Ultimate (Receiver)": 0.2}
+# Funkmaus: nur so lange nach der letzten Bewegung/Taste Befehle schicken.
+# Danach bleibt sie in Ruhe und kann nach ihrem eigenen Timer einschlafen.
+MOUSE_ACTIVE = 30.0
+# Ladezustand der Funkmaus abfragen (jede Abfrage ist auch ein Funkpaket)
+CHARGE_CHECK = 60.0
 
 
 class Razer:
@@ -276,6 +293,48 @@ class Razer:
         self.state = state          # {"cols": [...]} – von der Hauptschleife gepflegt
         self.threads = {}
         self.next_try = 0
+        self.last_input = time.time()
+        threading.Thread(target=self.watch_input, daemon=True).start()
+
+    def watch_input(self):
+        """Merkt sich, wann die Razer-Maus zuletzt bewegt/geklickt wurde
+        (Eingabegeräte von Empfänger und Dock, Gruppe input)."""
+        import glob
+        import select
+        try:
+            import evdev
+        except ImportError:
+            log("python-evdev fehlt – Funkmaus bekommt Farben ohne Aktivitätsprüfung")
+            self.last_input = float("inf")
+            return
+        devs, paths, rescan = {}, set(), 0.0
+        while True:
+            now = time.time()
+            if now > rescan:
+                rescan = now + 10
+                found = set(glob.glob("/dev/input/by-id/*Razer*event-mouse"))
+                if found != paths:
+                    for d in devs.values():
+                        d.close()
+                    devs = {}
+                    for path in found:
+                        try:
+                            d = evdev.InputDevice(path)
+                            devs[d.fd] = d
+                        except OSError as e:
+                            log(f"{path}: nicht lesbar ({e})")
+                    paths = found
+            if not devs:
+                time.sleep(5)
+                continue
+            try:
+                ready, _, _ = select.select(list(devs), [], [], 5)
+                for fd in ready:
+                    for _ in devs[fd].read():
+                        pass
+                    self.last_input = time.time()
+            except OSError:
+                rescan = 0                # Gerät abgezogen – neu suchen
 
     def ensure(self):
         if time.time() < self.next_try:
@@ -323,8 +382,15 @@ class Razer:
         while True:
             now = time.time()
             try:
+                if has_batt:
+                    # Funkmaus in Ruhe lassen, solange sie nicht benutzt wird;
+                    # nach dem Aufwachen die Farbe einmal neu schicken
+                    if now - self.last_input > MOUSE_ACTIVE:
+                        last, charge_check = None, 0.0
+                        time.sleep(0.5)
+                        continue
                 if has_batt and now > charge_check:
-                    charge_check = now + 10
+                    charge_check = now + CHARGE_CHECK
                     charging = bool(d.is_charging)
                     # schlafende Funkmaus meldet 0 % – nichts schicken, sonst
                     # stauen sich Befehle und werden beim Aufwachen nachgeholt
@@ -335,7 +401,8 @@ class Razer:
                 if now - last_write < min_gap:
                     time.sleep(min(0.05, min_gap - (now - last_write)))
                     continue
-                rgb = hsv2rgb(color_at(self.state["cols"], now + lat + lead))
+                pick = color_step if has_batt else color_at
+                rgb = hsv2rgb(pick(self.state["cols"], now + lat + lead))
                 if rgb == last:
                     time.sleep(0.05)
                     continue
