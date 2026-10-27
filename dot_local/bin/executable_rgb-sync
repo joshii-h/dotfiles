@@ -261,10 +261,9 @@ BRIGHTNESS = {"Razer Mouse Dock": 40}
 # Zusätzlicher Vorlauf in Sekunden: OpenRazer/Firmware zeigen die Farbe erst
 # deutlich nach dem Schreiben an. Per Webcam gemessen (2026-10-27) gegen die
 # pünktliche Tastatur: Maus +1,5 s, Dock +1,25 s Versatz.
-RAZER_LEAD = {"Razer Basilisk Ultimate (Receiver)": 0.5, "Razer Mouse Dock": 1.25}
-# Mindestabstand zwischen zwei Farbwechseln: Die Funkmaus braucht 4 Befehle
-# (Zonen) je Wechsel und staut sie sonst auf – der Versatz wächst dann.
-RAZER_MIN_INTERVAL = {"Razer Basilisk Ultimate (Receiver)": 1.0}
+RAZER_LEAD = {"Razer Basilisk Ultimate (Receiver)": 0.0, "Razer Mouse Dock": 1.25}
+# Mindestabstand zwischen zwei Farbwechseln (Funkstrecke nicht überfahren)
+RAZER_MIN_INTERVAL = {"Razer Basilisk Ultimate (Receiver)": 0.2}
 
 
 class Razer:
@@ -310,6 +309,13 @@ class Razer:
             log(f"{d.name}: Helligkeit nicht gesetzt ({e})")
         log("OpenRazer:", d.name, f"{level} %")
         has_batt = bool(caps.get("battery"))
+        # Geräte mit LED-Matrix bekommen einen Custom Frame (ein Befehl für alle
+        # LEDs, so macht es Synapse): Basilisk 128 ms statt ~600 ms für 4 Zonen
+        matrix = None
+        if caps.get("lighting_led_matrix"):
+            m = d.fx.advanced
+            if m.rows * m.cols > 1:
+                matrix = m
         lead = RAZER_LEAD.get(d.name, 1.3)
         min_gap = RAZER_MIN_INTERVAL.get(d.name, 0.0)
         last_write = 0.0
@@ -334,11 +340,17 @@ class Razer:
                     time.sleep(0.05)
                     continue
                 t0 = last_write = time.time()
-                if caps.get("lighting_static"):
-                    d.fx.static(*rgb)
-                for z, attr in ZONES.items():
-                    if caps.get(f"lighting_{z}_static"):
-                        getattr(d.fx.misc, attr).static(*rgb)
+                if matrix:
+                    for r in range(matrix.rows):
+                        for c in range(matrix.cols):
+                            matrix.matrix[r, c] = rgb
+                    matrix.draw()
+                else:
+                    if caps.get("lighting_static"):
+                        d.fx.static(*rgb)
+                    for z, attr in ZONES.items():
+                        if caps.get(f"lighting_{z}_static"):
+                            getattr(d.fx.misc, attr).static(*rgb)
                 # Laufzeit glätten; die Farbe soll in der Mitte der Übertragung stimmen
                 lat = 0.8 * lat + 0.2 * ((time.time() - t0) / 2)
                 last = rgb

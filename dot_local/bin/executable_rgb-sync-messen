@@ -10,6 +10,8 @@ nach 4 min ein), Licht während der Messung nicht ändern.
 
   rgb-sync-messen            # aufnehmen und auswerten
   rgb-sync-messen -v         # zusätzlich Farbton-Verlauf ausgeben
+  rgb-sync-messen --Maus=385,250,500,450 --Dock=200,415,340,570
+                             # Messbereiche (Pixel bei 1280×720) anpassen
 """
 import os
 import subprocess
@@ -30,6 +32,11 @@ import colorsys, glob, math, json, sys
 from PIL import Image
 
 regions={'Maus':(335,285,390,370),'Dock':(470,300,580,432),'Tast':(645,275,1275,468)}
+# Bereiche anpassen, wenn die Kamera anders steht: --Maus=x1,y1,x2,y2 usw.
+for a in sys.argv[1:]:
+    if a.startswith('--') and '=' in a and a[2:].split('=')[0] in regions:
+        k, v = a[2:].split('=', 1)
+        regions[k] = tuple(int(x) for x in v.split(','))
 def mean_hue(im, box):
     xs=ys=n=0
     for r,g,b in im.crop(box).convert('RGB').get_flattened_data():
