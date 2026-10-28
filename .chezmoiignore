@@ -52,6 +52,10 @@ msteams-pwa-handler/**
 .local/bin/grub-theme
 .config/sysup/**
 {{- end }}
+# Plymouth-Startbild (Fedora-Logo, dracut) bisher nur auf dem Laptop
+{{- if ne .distro "fedora" }}
+.local/bin/startbild
+{{- end }}
 # Von DMS erzeugt (dms setup, Farbschema) – nicht von chezmoi verwalten
 .config/niri/dms/**
 .config/nvim/colors/dms.lua
