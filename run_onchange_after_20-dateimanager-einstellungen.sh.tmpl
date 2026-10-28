@@ -1,4 +1,3 @@
-{{- if eq .distro "gentoo" -}}
 #!/bin/sh
 # Einstellungen für Nautilus und Nemo (dconf, nicht als Datei verwaltbar).
 # Läuft erneut, sobald sich dieses Skript ändert.
@@ -28,4 +27,3 @@ gsettings set org.gnome.desktop.interface document-font-name 'Google Sans Flex 1
 gsettings set org.gnome.desktop.interface monospace-font-name 'JetBrains Mono 10'
 gsettings set org.cinnamon.desktop.interface icon-theme 'Papirus-Dark-Akzent' 2>/dev/null || true
 gsettings set org.cinnamon.desktop.interface gtk-theme 'adw-gtk3-dark' 2>/dev/null || true
-{{- end }}

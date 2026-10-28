@@ -1,4 +1,6 @@
-// niri – zweite Sitzung neben KDE Plasma (Battlestation)
+// niri – Battlestation (Gentoo, einziger Desktop) und Laptop (Fedora,
+// vorerst zweite Sitzung neben KDE Plasma). Vorlage für chezmoi: Monitore,
+// Eingabegeräte und Autostart unterscheiden sich je nach .distro.
 // Doku: https://github.com/niri-wm/niri/wiki/Configuration:-Introduction
 // Oberfläche: DankMaterialShell / Dux Shell (dms) – Leiste, Starter,
 // Benachrichtigungen, Sperre, Hintergrund. Einstellungen: Mod+Komma
@@ -10,14 +12,44 @@ input {
             layout "ch"
             model "pc105"
         }
+{{- if eq .distro "gentoo" }}
         numlock
+{{- end }}
     }
     mouse {
         accel-profile "flat"
     }
+{{- if eq .distro "fedora" }}
+    // Touchpad wie unter KDE: Tippen zum Klicken, Klick mit zwei/drei
+    // Fingern statt Zonen, Ziehen bleibt nach kurzem Loslassen aktiv
+    touchpad {
+        tap
+        click-method "clickfinger"
+        drag-lock
+        dwt
+    }
+{{- end }}
     // warp-mouse-to-focus: Maus sprang beim Fokuswechsel per Tastatur mit (lästig)
 }
 
+{{ if eq .distro "fedora" -}}
+// Anordnung wie unter KDE: Laptop links, am Dock zwei 1440p-Monitore rechts
+// daneben. Ohne Dock ignoriert niri die fehlenden Ausgänge.
+output "eDP-1" {
+    mode "2880x1800"
+    scale 1.6
+    position x=0 y=0
+}
+output "DP-5" {
+    mode "2560x1440"
+    position x=1800 y=0
+    focus-at-startup
+}
+output "DP-6" {
+    mode "2560x1440"
+    position x=4360 y=0
+}
+{{- else -}}
 // Anordnung wie unter KDE. Desktop mit 60 Hz – refresh-switch schaltet bei
 // Spielen auf volle Hz (165/90), damit der VRAM im Leerlauf runtertaktet.
 output "HDMI-A-2" {
@@ -35,6 +67,7 @@ output "HDMI-A-1" {
     mode "1920x1080@60.000"
     position x=4480 y=0
 }
+{{- end }}
 
 layout {
     gaps 8
@@ -76,11 +109,16 @@ environment {
 spawn-at-startup "dms" "run"
 // Nautilus im Hintergrund: öffnet Fenster sofort
 spawn-at-startup "nautilus" "--gapplication-service"
+{{- if eq .distro "gentoo" }}
 // D-Bus-gestartete Dienste (Passwortdialoge, Portale …) brauchen die
 // Wayland-Umgebung – unter systemd macht das niri-session, hier selbst:
 spawn-at-startup "dbus-update-activation-environment" "WAYLAND_DISPLAY" "DISPLAY" "XDG_CURRENT_DESKTOP" "XDG_SESSION_TYPE" "XDG_SESSION_DESKTOP" "NIRI_SOCKET" "SSH_AUTH_SOCK" "QT_QPA_PLATFORMTHEME"
 // SSH-Agent (gcr) am Sitzungs-D-Bus, Socket $XDG_RUNTIME_DIR/gcr/ssh
 spawn-at-startup "sh" "-c" "exec /usr/libexec/gcr-ssh-agent --base-dir \"$XDG_RUNTIME_DIR/gcr\""
+{{- else }}
+// Fedora: niri-session (systemd) übergibt die Umgebung an D-Bus selbst,
+// der SSH-Agent läuft als systemd-Socket (ssh-agent.socket).
+{{- end }}
 spawn-at-startup "dex" "--autostart" "--environment" "niri"
 
 // VRR nur für Spiele (on-demand), Desktop bleibt fest
@@ -124,7 +162,9 @@ binds {
     Mod+E hotkey-overlay-title="Dateien (Nautilus)" { spawn "nautilus" "--new-window"; }
     Mod+Alt+E hotkey-overlay-title="Dateien (Nemo, zum Vergleich)" { spawn "nemo"; }
     Mod+B hotkey-overlay-title="Firefox" { spawn "firefox"; }
+{{- if eq .distro "gentoo" }}
     Mod+F12 hotkey-overlay-title="Hz-Automatik umschalten" { spawn "refresh-switch-toggle"; }
+{{- end }}
     Ctrl+Alt+Delete hotkey-overlay-title="Ausschalt-Menü" { spawn "dms" "ipc" "call" "powermenu" "toggle"; }
 
     // Spalten-Navigation läuft am Rand nahtlos auf den Nachbarmonitor weiter

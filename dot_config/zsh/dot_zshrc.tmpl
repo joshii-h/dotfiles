@@ -228,7 +228,7 @@ sysup() {
   command sudo -n true 2>/dev/null || command sudo -v || return 1
   ssh-add -l &>/dev/null || { ssh-add ~/.ssh/id_ed25519 || return 1; }
   setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
-  local -a names=(dnf flatpak rustup deno npm dotfiles noson claude)
+  local -a names=(dnf flatpak rustup deno npm dotfiles noson claude rice)
   (( $+commands[VBoxManage] )) && names+=(vbox)
   # Logs der Paket-Jobs und die Zusammenfassung bleiben liegen (je die letzten
   # 10 Läufe), der Rest steckt danach in der Zusammenfassung.
@@ -287,13 +287,22 @@ sysup() {
     print "__SYSUP_RC=$rc"
   } &>"${logs[8]}" &
   pids+=($!)
+  # "rice": Teile des niri-Desktops, die nicht aus den Fedora-Quellen kommen,
+  # sondern als Releases von GitHub - Dux Shell (`dms`, sha256-geprüft) und
+  # uosc (Bedienleiste für mpv); dazu ordner-symbole (Akzent-Symboltheme nach
+  # Papirus-Updates neu verknüpfen, neue Repos bekommen ihr Symbol).
+  zsh -fc '$HOME/.local/bin/dms-update; r1=$?
+    $HOME/.local/bin/uosc-update; r2=$?
+    $HOME/.local/bin/ordner-symbole; r3=$?
+    exit $(( r1 || r2 || r3 ))' &>"${logs[9]}" &
+  pids+=($!)
   # vbox wartet auf dnf, das evtl. gerade VirtualBox selbst aktualisiert.
-  if (( ${#names} >= 9 )); then
+  if (( ${#names} >= 10 )); then
     {
       print "wartet auf dnf ..."
       while kill -0 $dnf_pid 2>/dev/null; do sleep 2; done
       _sysup_vbox
-    } &>"${logs[9]}" &
+    } &>"${logs[10]}" &
     pids+=($!)
   fi
   local lines=$(( ${#names} + 2 ))

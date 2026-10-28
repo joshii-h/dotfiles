@@ -37,40 +37,24 @@ msteams-pwa-handler/**
 .local/share/ai/*.png
 .local/share/ai/*.wav
 
-# niri-Sitzung (zweite Sitzung neben Plasma, OpenRC-Starter in /usr/local)
-# mit Monitor-Layout der Battlestation -> nur Gentoo.
+# niri + Dux Shell (DMS) läuft auf beiden Rechnern: Config (Monitore je
+# Distro in config.kdl.tmpl), Portale, matugen, GTK/Qt-Look, Schriften,
+# Dateimanager-Aktionen und dms-/uosc-update werden überall verwaltet.
+# Nur Battlestation-Hardware bleibt Gentoo: RGB (OpenRazer/OpenRGB),
+# Geräteakku-Plugin, GRUB-Theme, Lesezeichen und portage-Leichen.
 {{- if ne .distro "gentoo" }}
-.config/niri/**
-.config/xdg-desktop-portal/niri-portals.conf
-.config/matugen/**
-.config/gtk-2.0/gtkrc
-.config/fontconfig/**
 .config/dms/plugins/**
 .config/autostart/openrazer-daemon.desktop
 .config/autostart/rgb-sync.desktop
 .local/bin/rgb-sync
 .local/bin/rgb-sync-messen
 .config/gtk-3.0/bookmarks
-.config/gtk-3.0/gtk.css
-.config/gtk-3.0/battlestation.css
-.config/gtk-4.0/gtk.css
-.config/gtk-4.0/battlestation.css
-.local/share/nautilus/**
-.local/share/nemo/**
-.local/bin/dateimanager-aktion
-.local/bin/ordner-symbole
 .local/bin/grub-theme
 .config/sysup/**
-.config/niri/dms/**
-.local/bin/dms-update
-.local/bin/uosc-update
 {{- end }}
+# Von DMS erzeugt (dms setup, Farbschema) – nicht von chezmoi verwalten
+.config/niri/dms/**
 .config/nvim/colors/dms.lua
 .config/nvim/lua/lualine/themes/dms.lua
 
-# Auf der Battlestation erzeugt matugen/DMS die starship.toml aus der Vorlage
-# in ~/.config/matugen/templates (Farben aus dem Hintergrundbild).
-{{- if eq .distro "gentoo" }}
-.config/starship.toml
-{{- end }}
 **/__pycache__
