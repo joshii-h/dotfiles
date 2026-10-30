@@ -6,3 +6,4 @@ www-client/firefox-l10n  ESR-Regel: immer neueste ESR, greift beim nächsten ESR
 media-libs/dav1d         ESR-Regel: immer neueste ESR, greift beim nächsten ESR-Sprung
 dev-libs/nss             ESR-Regel: immer neueste ESR, greift beim nächsten ESR-Sprung
 repo:steam-overlay       ganzes Steam-Overlay freigegeben (*/*::steam-overlay)
+sys-kernel/linux-firmware Grafik-Stack-Regel (Navi31): neueste Firmware, greift sobald ~amd64 vor stable liegt
