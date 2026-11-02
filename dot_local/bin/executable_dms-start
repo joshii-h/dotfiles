@@ -1,0 +1,16 @@
+#!/bin/sh
+# dms-start — startet Dux Shell beim Login (niri spawn-at-startup).
+#
+# Liegt unter ~/.local/share/dux-shell-ui eine eigene Oberfläche (Wetter-PRs,
+# solange sie upstream nicht drin sind) und passt ihre VERSION zur installierten
+# dms-Version, startet dms mit ihr. Sonst die eingebaute Oberfläche – z. B. nach
+# einem dms-update, bevor der eigene Stand nachgezogen ist.
+ui="$HOME/.local/share/dux-shell-ui"
+if [ -f "$ui/shell.qml" ] && [ -f "$ui/VERSION" ]; then
+    installed=$(dms version 2>/dev/null | awk '{print $2}')
+    if [ -n "$installed" ] && [ "$installed" = "$(cat "$ui/VERSION")" ]; then
+        exec dms run -c "$ui" "$@"
+    fi
+    echo "dms-start: eigene Oberfläche ($(cat "$ui/VERSION")) passt nicht zu dms $installed – nehme die eingebaute" >&2
+fi
+exec dms run "$@"

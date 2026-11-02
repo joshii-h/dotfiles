@@ -106,7 +106,8 @@ environment {
 // dex startet ~/.config/autostart + /etc/xdg/autostart, dieselben Einträge
 // wie unter KDE; reine KDE-Dienste tragen OnlyShowIn=KDE. Xwayland (Steam,
 // Spiele, Horizon) startet niri bei Bedarf über xwayland-satellite.
-spawn-at-startup "dms" "run"
+// dms-start nimmt die eigene Oberfläche (~/.local/share/dux-shell-ui), wenn sie zur dms-Version passt
+spawn-at-startup "dms-start"
 // Nautilus im Hintergrund: öffnet Fenster sofort
 spawn-at-startup "nautilus" "--gapplication-service"
 {{- if eq .distro "gentoo" }}
