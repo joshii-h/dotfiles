@@ -1,0 +1,8 @@
+# Sperrt die D-Bus-Autostart-Datei von mako (überschreibt die Systemdatei
+# gleichen Namens). Benachrichtigungen zeigt Dux Shell (DMS) an. Kommt beim
+# Login eine Benachrichtigung, bevor DMS bereit ist, würde sonst mako starten
+# und den Dienst dauerhaft belegen. mako bleibt installiert, weil
+# virtual/notification-daemon es verlangt.
+[D-BUS Service]
+Name=org.freedesktop.Notifications
+Exec=/bin/false
