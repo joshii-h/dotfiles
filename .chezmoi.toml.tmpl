@@ -1,8 +1,9 @@
 {{- $distro := "" -}}
+{{- /* os-release darf Werte in "…" oder '…' setzen (Gentoo: ID='gentoo') */ -}}
 {{- if stat "/etc/os-release" -}}
 {{-   range (split "\n" (include "/etc/os-release")) -}}
 {{-     if hasPrefix "ID=" . -}}
-{{-       $distro = trimPrefix "ID=" . -}}
+{{-       $distro = trimPrefix "ID=" . | trimAll "\"'" -}}
 {{-     end -}}
 {{-   end -}}
 {{- end -}}

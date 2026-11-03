@@ -3,7 +3,7 @@
 # Aktualisiert NUR den App-Layer (diffusers/transformers/ComfyUI/custom_nodes).
 # torch/vision/audio/triton bleiben ROCm-gepinnt (torch-constraints.txt) — nie CUDA.
 # System-ROCm-Libs (rocBLAS, MIOpen, …) kommen aus Portage und laufen über @world.
-# chezmoi-managed: ~/.local/share/chezmoi/ai/executable_ai-update.sh
+# chezmoi-managed: ~/.local/share/chezmoi/dot_local/share/ai/executable_ai-update.sh
 set -uo pipefail
 AI="${HOME}/.local/share/ai"
 VENV="${AI}/venv"
@@ -20,9 +20,11 @@ pipu() { "$PIP" install --upgrade --disable-pip-version-check -c "$CONSTR" "$@";
 # Aussagekraft - Installationen, Updates, Fehler - und quittiert einen
 # rauschfreien Lauf mit einem Wort, damit keine leere Sektion stehenbleibt.
 SIGNAL='Successfully (installed|uninstalled)|^Installed [0-9]+ package|^ [~+-] |^Updating [0-9a-f]+\.\.|^Fast-forward|^fatal:|^error:|^ERROR|WARNING:|Cannot |Could not |Container .+ (Started|Created|Recreated|Running)'
+# pip leitet bestehende Konflikte mit einer langen "ERROR: pip's dependency
+# resolver …"-Zeile ein; die Konflikte selbst wertet "pip check" am Ende aus.
 say() {
   local idle="${1:-unverändert}" out
-  out="$(grep -aE "$SIGNAL" | cut -c1-150)"
+  out="$(grep -aE "$SIGNAL" | grep -av "dependency resolver does not currently" | cut -c1-150)"
   if [[ -n "$out" ]]; then sed 's/^[[:space:]]*/   /' <<<"$out"; else echo "   ${idle}"; fi
 }
 
@@ -134,4 +136,31 @@ if [[ "$v" == *rocm* ]]; then
 else
   echo "!! WARNUNG: torch ist '$v' — KEIN ROCm-Build! setup-ai.sh erneut ausführen."
 fi
+# Konflikte zwischen installierten Paketen. Gewollte stehen mit Begründung in
+# pip-konflikte-gewollt ("paket" oder "paket abhängigkeit") und erscheinen nur
+# gedimmt; neue werden als Warnung gezeigt.
+echo ">> Abhängigkeiten prüfen (pip check)"
+known="${AI}/pip-konflikte-gewollt"
+"$PIP" check --disable-pip-version-check 2>&1 | awk -v known="$known" '
+  BEGIN {
+    while ((getline line < known) > 0) {
+      sub(/#.*/, "", line); n = split(line, w, " ")
+      if (n == 1) pkg[tolower(w[1])] = 1
+      if (n >= 2) dep[tolower(w[1]) " " tolower(w[2])] = 1
+    }
+  }
+  /^No broken requirements/ { next }
+  {
+    p = tolower($1); d = ""
+    if (match($0, / requires [^ ,]+/)) d = substr($0, RSTART + 10, RLENGTH - 10)
+    else if (match($0, / has requirement [^ ,=<>!~;]+/)) d = substr($0, RSTART + 17, RLENGTH - 17)
+    d = tolower(d); sub(/[=<>!~;].*/, "", d)
+    if ((p in pkg) || ((p " " d) in dep)) { kn[p] = 1; nk++ } else { print "   WARNING: neu: " substr($0, 1, 140); nn++ }
+  }
+  END {
+    if (nk) { list = ""; for (k in kn) list = list (list ? ", " : "") k
+              printf "   \033[2m%d gewollte Konflikte (%s) – %s\033[0m\n", nk, list, known }
+    if (!nk && !nn) print "   keine Konflikte"
+  }'
+
 echo "AI-Update fertig."

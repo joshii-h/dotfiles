@@ -11,7 +11,7 @@
 #
 #   dms-update           # neueste Version installieren (falls neuer)
 #   dms-update --force   # neu installieren, auch wenn schon aktuell
-#   dms-update --fonts   # nur Google Sans Flex aus der laufenden Shell übernehmen
+#   dms-update --fonts   # nur Google Sans Flex aus der Shell übernehmen
 #
 # Google Sans Flex (OFL) bringt die Shell nur für sich selbst mit; eine Kopie
 # in ~/.local/share/fonts macht sie auch für GTK, Qt und fontconfig nutzbar.
@@ -77,13 +77,17 @@ update() {
   fi
 }
 
-# Google Sans Flex aus der entpackten Shell kopieren (nur wenn neu/anders).
-# Die Shell entpackt sich beim Start nach /run/user/$UID/dms-shell/<hash>/.
+# Google Sans Flex aus der Shell kopieren (nur wenn neu/anders). Die eingebaute
+# Shell entpackt sich beim Start nach /run/user/$UID/dms-shell/<hash>/; eine
+# eigene Oberfläche (dms-start, ~/.local/share/dux-shell-ui) bringt sie selbst mit.
 sync_fonts() {
-  local src dst=${XDG_DATA_HOME:-$HOME/.local/share}/fonts/google-sans-flex
-  src=$(ls -td /run/user/"$(id -u)"/dms-shell/*/DCommon/assets/fonts/google-sans-flex 2>/dev/null | head -1 || true)
-  if [ -z "$src" ] || [ ! -f "$src/GoogleSansFlex.ttf" ]; then
-    info "Google Sans Flex: Shell läuft nicht – übersprungen."; return 0
+  local src="" dir dst=${XDG_DATA_HOME:-$HOME/.local/share}/fonts/google-sans-flex
+  for dir in $(ls -td /run/user/"$(id -u)"/dms-shell/*/DCommon/assets/fonts/google-sans-flex 2>/dev/null) \
+             "${XDG_DATA_HOME:-$HOME/.local/share}/dux-shell-ui/DCommon/assets/fonts/google-sans-flex"; do
+    [ -f "$dir/GoogleSansFlex.ttf" ] && { src=$dir; break; }
+  done
+  if [ -z "$src" ]; then
+    info "Google Sans Flex: keine Shell-Dateien gefunden (Shell nie gestartet?) – übersprungen."; return 0
   fi
   cmp -s "$src/GoogleSansFlex.ttf" "$dst/GoogleSansFlex.ttf" && return 0
   mkdir -p "$dst"

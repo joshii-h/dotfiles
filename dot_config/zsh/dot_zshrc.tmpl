@@ -1,3 +1,6 @@
+# Stand dieser Datei beim Laden: sysup erkennt so, ob die Shell noch eine alte
+# Fassung hat (chezmoi apply seit dem Start), und bittet um exec zsh.
+typeset -g _ZSHRC_MTIME=$(stat -c %Y "${ZDOTDIR:-$HOME}/.zshrc" 2>/dev/null)
 # Path (consolidated - no need for .deno/env and .local/bin/env)
 typeset -U path PATH
 export PATH="$HOME/.local/bin:$HOME/.deno/bin:$HOME/.juliaup/bin:$PATH"
@@ -808,6 +811,10 @@ _sysup_lock_live() {
 }
 
 sysup() {
+  if [[ -n $_ZSHRC_MTIME && $(stat -c %Y "${ZDOTDIR:-$HOME}/.zshrc" 2>/dev/null) != $_ZSHRC_MTIME ]]; then
+    print -P "%F{yellow}✗ Diese Shell hat noch eine alte sysup-Fassung geladen.%f Erst neu laden: %Bexec zsh%b"
+    return 1
+  fi
   # --shutdown / --reboot: nach dem kompletten Lauf ausschalten bzw. neustarten
   # (sysup-shutdown wartet auf den Lock, also auch auf die Zusammenfassung).
   local -a after=()

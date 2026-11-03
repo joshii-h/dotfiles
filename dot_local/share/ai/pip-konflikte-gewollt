@@ -1,0 +1,13 @@
+# Bekannte Konflikte aus "pip check" in ~/.local/share/ai/venv, die ai-update.sh
+# nur gedimmt zeigt. Format: "paket" (alle Konflikte dieses Pakets) oder
+# "paket abhängigkeit", danach # Begründung. Neue Konflikte erscheinen als Warnung.
+
+# Mit --no-deps installiert (setup-ai.sh): pinnt torch 2.6 (CUDA), transformers,
+# diffusers usw.; läuft mit den ROCm-gepinnten neueren Versionen (media-mcp-TTS).
+chatterbox-tts                # setup-ai.sh Schritt 5, Import geprüft 2026-11-03
+# torchcodec wird absichtlich entfernt (CUDA-Build beschädigt die GPU-Op-Registry);
+# Audio lädt media-mcp selbst über soundfile.
+pyannote-audio torchcodec
+# virtualenv hängt nur an pre-commit, das in dieser venv nicht genutzt wird;
+# ComfyUI zieht filelock 4.
+virtualenv filelock
