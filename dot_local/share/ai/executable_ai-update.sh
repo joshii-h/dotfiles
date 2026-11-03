@@ -144,17 +144,19 @@ known="${AI}/pip-konflikte-gewollt"
 "$PIP" check --disable-pip-version-check 2>&1 | awk -v known="$known" '
   BEGIN {
     while ((getline line < known) > 0) {
-      sub(/#.*/, "", line); n = split(line, w, " ")
-      if (n == 1) pkg[tolower(w[1])] = 1
-      if (n >= 2) dep[tolower(w[1]) " " tolower(w[2])] = 1
+      sub(/\r$/, "", line); sub(/#.*/, "", line); n = split(line, w, " ")
+      if (n == 1) pkg[norm(w[1])] = 1
+      if (n >= 2) dep[norm(w[1]) " " norm(w[2])] = 1
     }
   }
+  # Paketnamen wie pip vergleichen (PEP 503): Pyannote.Audio = pyannote-audio
+  function norm(x) { x = tolower(x); gsub(/[._-]+/, "-", x); return x }
   /^No broken requirements/ { next }
   {
-    p = tolower($1); d = ""
+    p = norm($1); d = ""
     if (match($0, / requires [^ ,]+/)) d = substr($0, RSTART + 10, RLENGTH - 10)
-    else if (match($0, / has requirement [^ ,=<>!~;]+/)) d = substr($0, RSTART + 17, RLENGTH - 17)
-    d = tolower(d); sub(/[=<>!~;].*/, "", d)
+    else if (match($0, / has requirement [^ ,\[=<>!~;]+/)) d = substr($0, RSTART + 17, RLENGTH - 17)
+    sub(/[\[=<>!~;].*/, "", d); d = norm(d)
     if ((p in pkg) || ((p " " d) in dep)) { kn[p] = 1; nk++ } else { print "   WARNING: neu: " substr($0, 1, 140); nn++ }
   }
   END {

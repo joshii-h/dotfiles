@@ -82,8 +82,10 @@ update() {
 # eigene Oberfläche (dms-start, ~/.local/share/dux-shell-ui) bringt sie selbst mit.
 sync_fonts() {
   local src="" dir dst=${XDG_DATA_HOME:-$HOME/.local/share}/fonts/google-sans-flex
-  for dir in $(ls -td /run/user/"$(id -u)"/dms-shell/*/DCommon/assets/fonts/google-sans-flex 2>/dev/null) \
-             "${XDG_DATA_HOME:-$HOME/.local/share}/dux-shell-ui/DCommon/assets/fonts/google-sans-flex"; do
+  # Die eigene Oberfläche zuerst: läuft sie, kann unter /run noch eine ältere
+  # Entpackung der eingebauten liegen.
+  for dir in "${XDG_DATA_HOME:-$HOME/.local/share}/dux-shell-ui/DCommon/assets/fonts/google-sans-flex" \
+             $(ls -td /run/user/"$(id -u)"/dms-shell/*/DCommon/assets/fonts/google-sans-flex 2>/dev/null); do
     [ -f "$dir/GoogleSansFlex.ttf" ] && { src=$dir; break; }
   done
   if [ -z "$src" ]; then

@@ -1,6 +1,13 @@
 # Stand dieser Datei beim Laden: sysup erkennt so, ob die Shell noch eine alte
 # Fassung hat (chezmoi apply seit dem Start), und bittet um exec zsh.
 typeset -g _ZSHRC_MTIME=$(stat -c %Y "${ZDOTDIR:-$HOME}/.zshrc" 2>/dev/null)
+# Hat chezmoi die .zshrc seit dem Start dieser Shell geändert, könnte sysup hier
+# noch eine alte Fassung sein (neue Optionen würden still übergangen).
+_sysup_current() {
+  [[ -z $_ZSHRC_MTIME || $(stat -c %Y "${ZDOTDIR:-$HOME}/.zshrc" 2>/dev/null) == $_ZSHRC_MTIME ]] && return 0
+  print -P "%F{yellow}✗ Die .zshrc wurde seit dem Start dieser Shell geändert%f (sysup evtl. veraltet). Erst neu laden: %Bexec zsh%b"
+  return 1
+}
 # Path (consolidated - no need for .deno/env and .local/bin/env)
 typeset -U path PATH
 export PATH="$HOME/.local/bin:$HOME/.deno/bin:$HOME/.juliaup/bin:$PATH"
@@ -223,6 +230,7 @@ _sysup_vbox() {
 }
 
 sysup() {
+  _sysup_current || return 1
   if [[ "$1" == "-r" || "$1" == "--release" ]]; then
     _sysup_release "$2"
     return $?
@@ -811,10 +819,7 @@ _sysup_lock_live() {
 }
 
 sysup() {
-  if [[ -n $_ZSHRC_MTIME && $(stat -c %Y "${ZDOTDIR:-$HOME}/.zshrc" 2>/dev/null) != $_ZSHRC_MTIME ]]; then
-    print -P "%F{yellow}✗ Diese Shell hat noch eine alte sysup-Fassung geladen.%f Erst neu laden: %Bexec zsh%b"
-    return 1
-  fi
+  _sysup_current || return 1
   # --shutdown / --reboot: nach dem kompletten Lauf ausschalten bzw. neustarten
   # (sysup-shutdown wartet auf den Lock, also auch auf die Zusammenfassung).
   local -a after=()
@@ -858,8 +863,12 @@ sysup() {
   fi
   _sysup_lock_update $lock $$
   trap "_sysup_lock_update ${(q)lock}" EXIT
+  # Ein noch wartender Watcher eines früheren Laufs würde auch diesen Lauf abwarten.
+  local -a watcher=($(pgrep -f "^\S*bash \S*/sysup-shutdown( |$)"))
+  (( $#watcher && ! $#after )) && print -P "%F{yellow}! sysup-shutdown wartet noch%f und schaltet nach diesem Lauf aus (abbrechen: kill $watcher)"
   # Eigene Session: läuft weiter, wenn das Terminal geschlossen wird.
   if (( $#after )); then
+    (( $+commands[sysup-shutdown] )) || { print -P "%F{red}✗ sysup-shutdown nicht gefunden%f"; return 1; }
     setsid $after >$logdir/shutdown-$stamp.log 2>&1 &!
     print -P "%F{yellow}⏻ Nach dem Update: ${${after[2]:+Neustart}:-Ausschalten}%f (abbrechen: kill $!, danach sudo shutdown -c)"
   fi
@@ -940,7 +949,7 @@ sysup() {
         grep -q "Installiert: " $2 2>/dev/null \
           && print "  \033[33m!\033[0m neues GE-Proton erst nach einem Steam-Neustart wählbar"
       elif pgrep -f "^\S*bash \S*/sysup-shutdown( |$)" >/dev/null; then
-        print "Steam nicht gestartet - sysup-shutdown schaltet den Rechner danach aus"
+        print "Steam nicht gestartet - sysup-shutdown fährt den Rechner danach herunter"
       else
         setsid -f steam -silent </dev/null &>/dev/null
         print "Steam im Hintergrund gestartet (-silent) - Spiele-Updates laufen dort"
@@ -1057,7 +1066,7 @@ if devs:
     # bei Fehlern darauf).
     rm -f ${logs[3,-1]}
     local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) $logdir/flatpak-*.log(Nom[11,-1])
-                     $logdir/summary-*.txt(Nom[11,-1])
+                     $logdir/summary-*.txt(Nom[11,-1]) $logdir/shutdown-*.log(Nom[11,-1])
                      $logdir/(dotfiles|proton-ge|ai|steam|firmware|rice)-*.log(Nmh+24) )
     (( $#stale )) && rm -f $stale
     printf "\n\033[1;32m✓ Done in %ds\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$((SECONDS - start))" "$summary"
