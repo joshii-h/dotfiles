@@ -34,3 +34,7 @@ post_hook = 'sh -c "$HOME/.local/bin/ordner-symbole --auto >/dev/null 2>&1 &"'
 [templates.rgbpalette]
 input_path = "~/.config/matugen/templates/rgb-palette.json"
 output_path = "~/.cache/matugen/rgb-palette.json"
+
+[templates.claude-statusline]
+input_path = "~/.config/matugen/templates/claude-statusline.sh"
+output_path = "~/.cache/matugen/claude-statusline.sh"
