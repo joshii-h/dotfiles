@@ -1,4 +1,5 @@
 # Path (consolidated - no need for .deno/env and .local/bin/env)
+typeset -U path PATH
 export PATH="$HOME/.local/bin:$HOME/.deno/bin:$HOME/.juliaup/bin:$PATH"
 export FPATH="$XDG_DATA_HOME/zsh/completions:$FPATH"
 
@@ -807,6 +808,18 @@ _sysup_lock_live() {
 }
 
 sysup() {
+  # --shutdown / --reboot: nach dem kompletten Lauf ausschalten bzw. neustarten
+  # (sysup-shutdown wartet auf den Lock, also auch auf die Zusammenfassung).
+  local -a after=()
+  while (( $# )); do
+    case $1 in
+      --shutdown) after=(sysup-shutdown) ;;
+      --reboot)   after=(sysup-shutdown --reboot) ;;
+      -h|--help)  print "sysup [--shutdown|--reboot]"; return 0 ;;
+      *) print -P "%F{red}✗ Unbekannte Option:%f $1"; return 2 ;;
+    esac
+    shift
+  done
   # sudo -v fragt hier trotz NOPASSWD nach dem Passwort: sudoers hat fuer %wheel
   # zusaetzlich eine Regel MIT Passwort, und -v prueft alle passenden Regeln.
   # sudo -n true genuegt als Vorab-Check und fragt nur, wenn wirklich noetig.
@@ -838,6 +851,11 @@ sysup() {
   fi
   _sysup_lock_update $lock $$
   trap "_sysup_lock_update ${(q)lock}" EXIT
+  # Eigene Session: läuft weiter, wenn das Terminal geschlossen wird.
+  if (( $#after )); then
+    setsid $after >$logdir/shutdown-$stamp.log 2>&1 &!
+    print -P "%F{yellow}⏻ Nach dem Update: ${${after[2]:+Neustart}:-Ausschalten}%f (abbrechen: kill $!, danach sudo shutdown -c)"
+  fi
   # Strg+C/TERM verlassen nur die Anzeige, die Jobs laufen weiter; gezielt
   # abbrechen nur per "sudo kill" (emerge nie mitten im Merge - das hat am
   # 2026-09-15 einen Portage-Deadlock ausgeloest). Ohne eigenen Trap bricht zsh

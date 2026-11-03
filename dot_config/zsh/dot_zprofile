@@ -1,0 +1,6 @@
+# Login-Shells: /etc/zsh/zprofile setzt PATH aus /etc/profile.env neu, darum
+# kommen die eigenen Ordner hier wieder dazu. Der niri-Starter
+# (niri-openrc-session) läuft über eine Login-Shell, so finden niri und alle
+# daraus gestarteten Programme z. B. dms-start in ~/.local/bin.
+typeset -U path PATH
+export PATH="$HOME/.local/bin:$HOME/.deno/bin:$HOME/.juliaup/bin:$PATH"
