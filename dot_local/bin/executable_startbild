@@ -181,7 +181,7 @@ fun message(text) {
   msg.SetImage(img);
   msg.SetX(ox + (sw - img.GetWidth()) / 2);
 }
-Plymouth.SetMessageFunction(message);
+Plymouth.SetDisplayMessageFunction(message);
 
 # Passwortabfrage (z. B. verschlüsselte Platte): Text + Punkte unter dem Logo
 pprompt = Sprite();
@@ -205,6 +205,23 @@ fun normal() {
   pbullets.SetOpacity(0);
 }
 Plymouth.SetDisplayNormalFunction(normal);
+
+# Offline-Updates (Discover/dnf beim Neustart): Hinweis und Fortschritt
+# unter dem Ring, damit klar ist, warum kein Login-Bildschirm kommt
+upd = Sprite();
+upd.SetPosition(ox, oy + sh * 0.66, 20);
+fun showupdate(text) {
+  img = Image.Text(text, $(rgbf "$ON_SURFACE"), 1, "Google Sans Flex 15");
+  upd.SetImage(img);
+  upd.SetX(ox + (sw - img.GetWidth()) / 2);
+}
+mode = Plymouth.GetMode();
+if (mode == "updates" || mode == "system-upgrade" || mode == "firmware-upgrade")
+  showupdate("Updates werden installiert – bitte nicht ausschalten");
+fun sysupdate(progress) {
+  showupdate("Updates werden installiert: " + Math.Int(progress) + " % – bitte nicht ausschalten");
+}
+Plymouth.SetSystemUpdateFunction(sysupdate);
 EOF
 
 # Vorschau (gleicher Aufbau wie das Skript, 1440x900)
