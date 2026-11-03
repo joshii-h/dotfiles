@@ -238,6 +238,8 @@ sysup() {
   # sudo -v fragt trotz NOPASSWD nach dem Passwort (zweite %wheel-Regel mit
   # Passwort); sudo -n true genügt als Vorab-Check.
   command sudo -n true 2>/dev/null || command sudo -v || return 1
+  # Textkonsole/niri: SSH_AUTH_SOCK fehlt dort, der systemd-Agent läuft trotzdem
+  [[ -z $SSH_AUTH_SOCK && -S $XDG_RUNTIME_DIR/ssh-agent.socket ]] && export SSH_AUTH_SOCK=$XDG_RUNTIME_DIR/ssh-agent.socket
   ssh-add -l &>/dev/null || { ssh-add ~/.ssh/id_ed25519 || return 1; }
   setopt LOCAL_OPTIONS NO_NOTIFY NO_MONITOR
   local -a names=(dnf flatpak rustup deno npm dotfiles noson claude rice)

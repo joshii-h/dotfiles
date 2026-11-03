@@ -55,6 +55,7 @@ msteams-pwa-handler/**
 # Plymouth-Startbild (Fedora-Logo, dracut) bisher nur auf dem Laptop
 {{- if ne .distro "fedora" }}
 .local/bin/startbild
+.config/environment.d/20-ssh-agent.conf
 {{- end }}
 # Von DMS erzeugt (dms setup, Farbschema) – nicht von chezmoi verwalten
 .config/niri/dms/**
