@@ -35,19 +35,21 @@ input {
 {{ if eq .distro "fedora" -}}
 // Anordnung wie unter KDE: Laptop links, am Dock zwei 1440p-Monitore rechts
 // daneben. Ohne Dock ignoriert niri die fehlenden Ausgänge.
+// Monitore per Hersteller/Modell/Seriennummer, weil die DP-Nummer je nach
+// Dock wechselt (DP-5/6, DP-7/8 ...). Skalierung 2: logisch 1440x900.
 output "eDP-1" {
     mode "2880x1800"
-    scale 1.6
+    scale 2
     position x=0 y=0
 }
-output "DP-5" {
+output "Lenovo Group Limited P27h-20 V90CW446" {
     mode "2560x1440"
-    position x=1800 y=0
+    position x=1440 y=0
     focus-at-startup
 }
-output "DP-6" {
+output "Lenovo Group Limited P27q-20 V90A7MK3" {
     mode "2560x1440"
-    position x=4360 y=0
+    position x=4000 y=0
 }
 {{- else -}}
 // Anordnung wie unter KDE. Desktop mit 60 Hz – refresh-switch schaltet bei
@@ -116,11 +118,13 @@ spawn-at-startup "nautilus" "--gapplication-service"
 spawn-at-startup "dbus-update-activation-environment" "WAYLAND_DISPLAY" "DISPLAY" "XDG_CURRENT_DESKTOP" "XDG_SESSION_TYPE" "XDG_SESSION_DESKTOP" "NIRI_SOCKET" "SSH_AUTH_SOCK" "QT_QPA_PLATFORMTHEME"
 // SSH-Agent (gcr) am Sitzungs-D-Bus, Socket $XDG_RUNTIME_DIR/gcr/ssh
 spawn-at-startup "sh" "-c" "exec /usr/libexec/gcr-ssh-agent --base-dir \"$XDG_RUNTIME_DIR/gcr\""
+spawn-at-startup "dex" "--autostart" "--environment" "niri"
 {{- else }}
 // Fedora: niri-session (systemd) übergibt die Umgebung an D-Bus selbst,
-// der SSH-Agent läuft als systemd-Socket (ssh-agent.socket).
+// der SSH-Agent läuft als systemd-Socket (ssh-agent.socket). Den Autostart
+// übernimmt systemd (xdg-autostart-generator) statt dex; KDE-Helfer ohne
+// OnlyShowIn sind in ~/.config/autostart auf KDE beschränkt.
 {{- end }}
-spawn-at-startup "dex" "--autostart" "--environment" "niri"
 
 // VRR nur für Spiele (on-demand), Desktop bleibt fest
 window-rule {
