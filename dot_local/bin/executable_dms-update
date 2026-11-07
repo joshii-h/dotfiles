@@ -15,8 +15,7 @@
 #   dms-update --no-restart  # laufende Shell nach dem Update nicht neu starten
 #
 # Läuft die Shell gerade in niri, startet sie nach einem Update neu (über
-# dms-start): sonst spricht die Oberfläche mit dem alten Hintergrunddienst,
-# und neue Funktionen (z. B. weather.get) fehlen bis zum nächsten Login.
+# dms-start); sonst läuft bis zum nächsten Login die alte Version weiter.
 #
 # Google Sans Flex (OFL) bringt die Shell nur für sich selbst mit; eine Kopie
 # in ~/.local/share/fonts macht sie auch für GTK, Qt und fontconfig nutzbar.
@@ -24,7 +23,7 @@
 set -euo pipefail
 
 
-FORCE=0; ONLY_FONTS=0; RESTART=1; SHELL_UPDATED=0
+FORCE=0; ONLY_FONTS=0; RESTART=1; SHELL_UPDATED=""; SHELL_BIN=/usr/local/bin/dms
 for arg in "$@"; do
   case "$arg" in
     --force)      FORCE=1 ;;
@@ -79,32 +78,57 @@ update() {
   sudo -n install -m755 "$bin" "$dest"
   rm -rf "$tmp"
   info "Installiert: $name ${tag}"
-  [ "$name" = "Dux Shell" ] && SHELL_UPDATED=1
+  [ "$name" = "Dux Shell" ] && SHELL_UPDATED=$tag
   return 0
 }
 
-# Die laufende Shell (`dms run …`) beenden und über dms-start neu starten, damit
-# Oberfläche und Hintergrunddienst dieselbe Version haben. Nur in niri: von
-# einer Konsole aus gäbe es nichts, worin sie starten könnte.
+# Die laufende Shell beenden und über dms-start neu starten, damit sie die neue
+# Version nutzt. Nur Shells des ersetzten Programms (nicht etwa ein Test-Build
+# aus einem anderen Ordner), und nur in niri: von einer Konsole aus gäbe es
+# nichts, worin sie starten könnte. Terminals aus der Shell überleben das, sie
+# laufen losgelöst von ihr.
 restart_shell() {
-  local pids pid alive
-  pids=$(pgrep -f '^(/[^ ]*/)?dms run( |$)' || true)
+  local tag=$1 pids kids pid alive starter="$HOME/.local/bin/dms-start"
+  local ui="${XDG_DATA_HOME:-$HOME/.local/share}/dux-shell-ui"
+  pids=$(pgrep -f "^(${SHELL_BIN}|dms) run( |\$)" || true)
   [ -n "$pids" ] || return 0
-  if [ "$RESTART" -eq 0 ] || [ -z "${NIRI_SOCKET:-}" ] || ! command -v dms-start >/dev/null; then
+  if [ "$RESTART" -eq 0 ] || [ -z "${NIRI_SOCKET:-}" ] || [ ! -x "$starter" ]; then
     printf '  \033[33m!\033[0m Dux Shell läuft noch mit der alten Version – aktiv nach einem Neustart der Shell oder dem nächsten niri-Login\n'
     return 0
   fi
+  if [ -f "$ui/shell.qml" ] && [ "$(cat "$ui/VERSION" 2>/dev/null)" != "$tag" ]; then
+    printf '  \033[33m!\033[0m Eigene Oberfläche (%s) passt nicht zu %s – es startet die eingebaute\n' "$(cat "$ui/VERSION" 2>/dev/null || echo '?')" "$tag"
+  fi
   info "Starte Dux Shell neu ..."
+  # `dms run` gibt SIGTERM an die Oberfläche (qs) weiter und endet sofort; erst
+  # wenn auch die weg ist, darf die neue starten, sonst sieht sie die alte noch
+  # laufen und beendet sich gleich wieder.
+  kids=$(for pid in $pids; do pgrep -P "$pid" || true; done)
   # shellcheck disable=SC2086
   kill $pids 2>/dev/null || true
-  # Bis zu 10 s warten, bis alle beendet sind.
-  for _ in $(seq 40); do
+  # shellcheck disable=SC2086
+  if ! wait_gone $pids $kids; then
+    # shellcheck disable=SC2086
+    kill -KILL $pids $kids 2>/dev/null || true
+    # shellcheck disable=SC2086
+    if ! wait_gone $pids $kids; then
+      err "Die alte Dux Shell lässt sich nicht beenden – nichts neu gestartet."
+      return 1
+    fi
+  fi
+  niri msg action spawn -- "$starter" >/dev/null || { err "Dux Shell ließ sich nicht neu starten – bitte \`dms-start\` ausführen."; return 1; }
+}
+
+# wait_gone <PID>… – bis zu 5 s warten, bis alle beendet sind.
+wait_gone() {
+  local pid alive
+  for _ in $(seq 20); do
     alive=0
-    for pid in $pids; do kill -0 "$pid" 2>/dev/null && alive=1; done
-    [ "$alive" -eq 0 ] && break
+    for pid in "$@"; do kill -0 "$pid" 2>/dev/null && alive=1; done
+    [ "$alive" -eq 0 ] && return 0
     sleep 0.25
   done
-  niri msg action spawn -- dms-start >/dev/null || { err "Dux Shell ließ sich nicht neu starten – bitte \`dms-start\` ausführen."; return 1; }
+  return 1
 }
 
 # Google Sans Flex aus der Shell kopieren (nur wenn neu/anders). Die eingebaute
@@ -131,8 +155,8 @@ sync_fonts() {
 if [ "$ONLY_FONTS" -eq 1 ]; then sync_fonts; exit 0; fi
 
 rc=0
-update "Dux Shell"   duxlabs-dev/dux-shell   dms-cli-amd64.gz            /usr/local/bin/dms         || rc=1
+update "Dux Shell"   duxlabs-dev/dux-shell   dms-cli-amd64.gz            "$SHELL_BIN"               || rc=1
 update "dms-greeter" duxlabs-dev/dux-greeter dms-greeter-linux-amd64.gz  /usr/local/bin/dms-greeter || rc=1
-if [ "$SHELL_UPDATED" -eq 1 ]; then restart_shell || rc=1; fi
+if [ -n "$SHELL_UPDATED" ]; then restart_shell "$SHELL_UPDATED" || rc=1; fi
 sync_fonts || rc=1
 exit $rc
