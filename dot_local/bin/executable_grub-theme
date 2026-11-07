@@ -31,7 +31,8 @@ MUTED=$(col on_surface_variant);  MUTED=${MUTED:-#d4c2cc}
 TRACK=$(col surface_container_high); TRACK=${TRACK:-#32272f}
 
 # nur neu bauen, wenn sich Hintergrund oder Akzentfarbe geändert haben
-STAMP="$(sha256sum "$WALL" | cut -c1-16)-$PRIMARY"
+# "v2": Format geändert (JPEG 4:2:0), alte Themes werden dadurch neu gebaut
+STAMP="v2-$(sha256sum "$WALL" | cut -c1-16)-$PRIMARY"
 if [ "$DRY" -eq 0 ] && [ "$(cat "$DEST/.quelle" 2>/dev/null)" = "$STAMP" ] \
    && grep -q "^GRUB_THEME=\"$DEST/theme.txt\"" /etc/default/grub; then
   info "GRUB-Theme ist aktuell."; exit 0
@@ -42,10 +43,12 @@ T="$W/battlestation"; mkdir -p "$T/icons"
 echo "$STAMP" > "$T/.quelle"
 
 info "Hintergrund: $(basename "$WALL")"
-# auf 1920x1080 zuschneiden, leicht abdunkeln (Menü bleibt lesbar)
+# auf 1920x1080 zuschneiden, leicht abdunkeln (Menü bleibt lesbar).
+# yuvj420p: GRUBs JPEG-Leser kann nur 4:2:0/4:4:4; ffmpeg übernimmt sonst die
+# Unterabtastung der Quelle (z. B. 4:4:0) → „jpeg: sampling method not supported“.
 ffmpeg -loglevel error -y -i "$WALL" \
   -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,eq=brightness=-0.10:saturation=1.05" \
-  -q:v 3 "$T/background.jpg"
+  -pix_fmt yuvj420p -q:v 3 "$T/background.jpg"
 
 # Auswahlbalken (9-Teil-Grafik von GRUB; nur Mitte + Seiten = Rechteck)
 hexa() { printf '0x%s@%s' "${1#\#}" "$2"; }
