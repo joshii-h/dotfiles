@@ -1,2 +1,9 @@
 # winget-IDs, die sysup NICHT aktualisiert (eine pro Zeile, Text nach # = Begründung)
+# "~ID" = nur mit "sysup -Attended" (Installer kann sofort neu starten, das fängt der Wächter nicht ab)
 TeamSpeakSystems.TeamSpeakClient.Beta.6   # winget kennt die installierte Beta-Version falsch (5.0.0) -> würde downgraden
+Omnissa.HorizonClient                     # wird von choco verwaltet (omnissa-horizon-client)
+Microsoft.VisualStudio.2019.BuildTools    # wird von choco verwaltet (visualstudio2019buildtools)
+~3Dconnexion.3DxWare.10                   # Treiber-Installer
+~Logitech.GHUB                            # Treiber-Installer
+~Corsair.iCUE.5                           # Treiber-Installer (stürzt zudem gern ab, 0xC000041D)
+~GIGABYTE.BIOS                            # BIOS-Werkzeug

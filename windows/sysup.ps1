@@ -1,3 +1,4 @@
+#Requires -Version 7
 <#
 .SYNOPSIS
   sysup für Windows – Gegenstück zum Linux-sysup aus den Dotfiles.
@@ -8,32 +9,38 @@
 
   Jobs:
     dotfiles  git pull des Dotfiles-Repos (~\Projects\dotfiles, Forgejo = SSOT)
-    winget   alle winget-Pakete (Ausnahmen: ~/.config/sysup/winget-skip.txt)
-    windows   Windows Update inkl. Treiber (installiert, startet NIE neu)
+    winget    alle winget-Pakete (Ausnahmen: ~/.config/sysup/winget-skip.txt)
+    windows   Windows Update inkl. Treiber (installiert, startet NIE neu;
+              Feature-Upgrades werden übersprungen)
     store     Microsoft-Store-Apps (Store-Updatescan anstossen)
     defender  Defender-Signaturen
     wsl       WSL-Kernel + apt in allen WSL-Distros
-    dev       rustup, npm -g, scoop, choco
+    dev       rustup, npm -g, scoop, choco (startet erst nach winget, damit sich
+              die MSI-Installer nicht gegenseitig blockieren)
 
   Logs und Zusammenfassungen: %LOCALAPPDATA%\sysup (die letzten 10 Läufe).
-  Während des Laufs bricht ein Wächter alle angekündigten Neustarts ab.
+  Während des Laufs bricht ein Wächter angekündigte (zeitverzögerte) Neustarts ab.
+  Sofortige Neustarts eines Installers kann er nicht abfangen; solche Pakete
+  stehen mit "~" in winget-skip.txt und laufen nur mit -Attended.
 
 .EXAMPLE
   sysup                       # alles
   sysup -Only winget,windows  # nur diese Jobs
   sysup -Skip store           # alles ausser Store
+  sysup -Attended             # auch Hersteller-Installer, die evtl. sofort neu starten
 #>
 [CmdletBinding()]
 param(
     [string[]]$Only,
-    [string[]]$Skip
+    [string[]]$Skip,
+    [switch]$Attended
 )
 # "a,b" kommt über pwsh -File als ein String an -> aufteilen und prüfen
 $valid = 'dotfiles','winget','windows','store','defender','wsl','dev'
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object Trim | Where-Object { $_ })
 $Skip = @($Skip | ForEach-Object { $_ -split ',' } | ForEach-Object Trim | Where-Object { $_ })
 $bad = @($Only + $Skip | Where-Object { $_ -notin $valid })
-if ($bad) { Write-Host "Unbekannte Jobs: $($bad -join ', ') (gültig: $($valid -join ', '))" -ForegroundColor Red; return }
+if ($bad) { Write-Host "Unbekannte Jobs: $($bad -join ', ') (gültig: $($valid -join ', '))" -ForegroundColor Red; exit 2 }
 
 $ErrorActionPreference = 'Continue'
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -42,7 +49,8 @@ if (-not $isAdmin) {
     $a = @('-NoProfile','-NoExit','-File',"`"$PSCommandPath`"")
     if ($Only) { $a += '-Only'; $a += ($Only -join ',') }
     if ($Skip) { $a += '-Skip'; $a += ($Skip -join ',') }
-    Start-Process pwsh -Verb RunAs -ArgumentList $a
+    if ($Attended) { $a += '-Attended' }
+    Start-Process (Get-Process -Id $PID).Path -Verb RunAs -ArgumentList $a
     return
 }
 
@@ -55,16 +63,29 @@ New-Item -ItemType Directory -Force $logDir, $cfgDir | Out-Null
 $jobs = $valid
 if ($Only) { $jobs = $jobs | Where-Object { $_ -in $Only } }
 if ($Skip) { $jobs = $jobs | Where-Object { $_ -notin $Skip } }
+$jobs = @($jobs)
 
-# --- Ausnahmeliste für winget (eine ID pro Zeile, # = Kommentar) ---------------
+# --- Ausnahmeliste für winget ---------------------------------------------------
+# Eine ID pro Zeile, Text nach # = Begründung. "~ID" = nur mit -Attended.
 $skipFile = Join-Path $cfgDir 'winget-skip.txt'
 if (-not (Test-Path $skipFile)) {
 @'
 # winget-IDs, die sysup NICHT aktualisiert (eine pro Zeile, Text nach # = Begründung)
+# "~ID" = nur mit "sysup -Attended" (Installer kann sofort neu starten)
 TeamSpeakSystems.TeamSpeakClient.Beta.6   # winget kennt die installierte Beta-Version falsch (5.0.0) -> würde downgraden
 '@ | Set-Content $skipFile -Encoding utf8
 }
-$wingetSkip = Get-Content $skipFile | ForEach-Object { ($_ -replace '#.*$','').Trim() } | Where-Object { $_ }
+$skipNotes = @()
+try {
+    $entries = Get-Content $skipFile -EA Stop | ForEach-Object { ($_ -replace '#.*$','').Trim() } | Where-Object { $_ }
+    $wingetSkip = @($entries | Where-Object { $_ -notlike '~*' })
+    $attendedOnly = @($entries | Where-Object { $_ -like '~*' } | ForEach-Object { $_.Substring(1).Trim() })
+    if (-not $Attended) { $wingetSkip += $attendedOnly }
+} catch {
+    # ohne Ausnahmeliste lieber gar nicht als z.B. TeamSpeak downgraden
+    $skipNotes += "  ✗ winget-skip.txt nicht lesbar ($($_.Exception.Message)) – winget-Job ausgelassen"
+    $jobs = @($jobs | Where-Object { $_ -ne 'winget' })
+}
 
 # Pakete, die die laufende Shell abschiessen würden: nur aktualisieren, wenn sysup
 # nicht selbst daraus läuft (MSIX-Update beendet alle Prozesse des Pakets).
@@ -83,28 +104,44 @@ $jobScripts.dotfiles = {
     if (-not (Test-Path (Join-Path $repo '.git'))) { "  ⊘ kein Dotfiles-Repo unter $repo"; return }
     $old = git -C $repo rev-parse HEAD
     $o = git -C $repo pull --ff-only 2>&1 | Out-String
+    $rc = $LASTEXITCODE
+    if ($rc -ne 0) { "  ✗ git pull: $(($o.Trim() -split "`r?`n")[0])"; return }
     $new = git -C $repo rev-parse HEAD
-    if ($LASTEXITCODE -ne 0) { "  ✗ git pull: $($o.Trim())"; return }
-    if ($old -eq $new) { "  ✓ Dotfiles aktuell" }
-    else { git -C $repo log --format='    ↑ %s' "$old..$new" -- windows }
+    if ($old -eq $new) { "  ✓ Dotfiles aktuell"; return }
+    "    ↑ Dotfiles $($old.Substring(0,7)) → $($new.Substring(0,7)) ($(git -C $repo rev-list --count "$old..$new") Commits)"
+    git -C $repo log --format='      %s' "$old..$new" -- windows
 }
 
 $jobScripts.winget = {
     param($skip, $selfHosted, $snapBefore, $snapAfter)
+    # Modul muss zur App-Installer-Version passen, sonst "Failed to create instance"
+    try { Update-PSResource Microsoft.WinGet.Client -Scope AllUsers -TrustRepository -EA Stop }
+    catch { try { Install-PSResource Microsoft.WinGet.Client -Scope AllUsers -TrustRepository -EA Stop } catch { "… Modul-Update fehlgeschlagen: $_" } }
     Import-Module Microsoft.WinGet.Client -EA Stop
-    $snap = { Get-WinGetPackage -EA SilentlyContinue | Where-Object Id | ForEach-Object { [pscustomobject]@{ Id=$_.Id; Name=$_.Name; Version=$_.InstalledVersion } } }
+    try { $null = Get-WinGetPackage -Id Microsoft.AppInstaller -EA Stop }
+    catch { throw "WinGet-Modul $((Get-Module Microsoft.WinGet.Client).Version) spricht nicht mit winget $(winget --version): $_ (Abhilfe: Repair-WinGetPackageManager -Latest)" }
+    # MSIX-Pakete ohne Quelle haben die Version in der ID -> herausnehmen, sonst
+    # erscheint jedes Update als "+ neu" und "− entfernt"
+    $snap = { Get-WinGetPackage -EA SilentlyContinue | Where-Object Id | ForEach-Object {
+        [pscustomobject]@{ Id = ($_.Id -replace '^(MSIX\\[^_]+)_\d+(\.\d+)*_', '$1_'); Name = $_.Name; Version = $_.InstalledVersion } } }
     & $snap | Export-Clixml $snapBefore
     $ups = Get-WinGetPackage | Where-Object { $_.IsUpdateAvailable }
     foreach ($p in $ups) {
-        if ($p.Id -in $skip)       { "  ⊘ übersprungen (winget-skip.txt): $($p.Name)"; continue }
+        if ($p.Id -in $skip)       { "  ⊘ übersprungen (winget-skip.txt): $($p.Name) $($p.InstalledVersion) -> $($p.AvailableVersions[0])"; continue }
         if ($p.Id -in $selfHosted) { "  ⊘ übersprungen (läuft gerade, sysup würde sich selbst beenden): $($p.Name)"; continue }
         "… $($p.Name) $($p.InstalledVersion) -> $($p.AvailableVersions[0])"
-        $out = winget upgrade --id $p.Id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-String
-        $out -split "`r?`n" | Where-Object { $_ -match '\S' -and $_ -notmatch '^\s*[-\\|/]\s*$' -and $_ -notmatch '[█▒]' } | Select-Object -Last 4
+        foreach ($try in 1, 2) {
+            $out = winget upgrade --id $p.Id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity 2>&1 | Out-String
+            $rc = $LASTEXITCODE
+            $out -split "`r?`n" | Where-Object { $_ -match '\S' -and $_ -notmatch '^\s*[-\\|/]\s*$' -and $_ -notmatch '[█▒]' } | Select-Object -Last 4
+            # 0x8A150102 = Installer meldet Fehler, meist 1618 (andere Installation läuft) -> einmal wiederholen
+            if ($rc -eq -1978334974 -and $try -eq 1) { "… andere Installation läuft, neuer Versuch in 30 s"; Start-Sleep 30; continue }
+            break
+        }
         # 0x8A15002B = kein passendes Update mehr (z.B. schon von choco/WU erledigt) -> kein Fehler
-        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {
-            $why = switch ($LASTEXITCODE) { -1978335226 { 'Installer fehlgeschlagen' } -1978334974 { 'Installer meldet Fehler/läuft gerade' } default { 'winget-Fehler' } }
-            "  ! $($p.Name): $why (Exit-Code 0x{0:X8})" -f $LASTEXITCODE
+        if ($rc -ne 0 -and $rc -ne -1978335189) {
+            $why = switch ($rc) { -1978335226 { 'Installer fehlgeschlagen' } -1978334974 { 'Installer meldet Fehler/läuft gerade' } default { 'winget-Fehler' } }
+            "  ! $($p.Name): $why (Exit-Code 0x$('{0:X8}' -f $rc))"
         }
     }
     & $snap | Export-Clixml $snapAfter
@@ -118,6 +155,8 @@ $jobScripts.windows = {
     try { $r = $searcher.Search("IsInstalled=0 and IsHidden=0") } catch { "  ✗ Suche fehlgeschlagen: $_"; return }
     $todo = New-Object -ComObject Microsoft.Update.UpdateColl
     foreach ($u in $r.Updates) {
+        # Feature-Upgrades brauchen mehrere Neustarts und stellen gern die Bootreihenfolge um
+        if (@($u.Categories | ForEach-Object Name) -contains 'Upgrades') { "  ⊘ Feature-Upgrade übersprungen (manuell einspielen): $($u.Title)"; continue }
         # Treiber (Type 2) markieren sich oft als "kann Eingabe verlangen", installieren aber still
         if ($u.InstallationBehavior.CanRequestUserInput -and $u.Type -ne 2) { "  ⊘ braucht Eingabe, übersprungen: $($u.Title)"; continue }
         if (-not $u.EulaAccepted) { $u.AcceptEula() }
@@ -157,13 +196,14 @@ $jobScripts.defender = {
 }
 
 $jobScripts.wsl = {
+    # WSL_UTF8=1: wsl.exe gibt UTF-8 statt UTF-16 aus
     "… wsl --update"
-    $o = (wsl.exe --update 2>&1 | Out-String) -replace "`0",''
-    $o.Trim() -split "`r?`n" | Select-Object -Last 3 | ForEach-Object { "  $_" }
-    $distros = ((wsl.exe -l -q 2>&1 | Out-String) -replace "`0",'') -split "`r?`n" | ForEach-Object Trim | Where-Object { $_ -and $_ -notlike 'docker-desktop*' }
+    $o = wsl.exe --update 2>&1 | Out-String
+    $o.Trim() -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 3 | ForEach-Object { "  $_" }
+    $distros = (wsl.exe -l -q 2>&1 | Out-String) -split "`r?`n" | ForEach-Object Trim | Where-Object { $_ -and $_ -notlike 'docker-desktop*' }
     foreach ($d in $distros) {
         "… apt in $d"
-        $o = wsl.exe -d $d -u root -- sh -c 'command -v apt-get >/dev/null || { echo "kein apt"; exit 0; }; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get -y -qq -o Dpkg::Options::=--force-confold full-upgrade | grep -E "^(Setting up|Inst|E:)" ; apt-get -y -qq autoremove >/dev/null; echo "__N=$(grep -c "status installed" /var/log/dpkg.log 2>/dev/null)"' 2>&1
+        $o = wsl.exe -d $d -u root -- sh -c 'command -v apt-get >/dev/null || { echo "kein apt"; exit 0; }; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get -y -qq -o Dpkg::Options::=--force-confold full-upgrade | grep -E "^(Setting up|Inst|E:)" ; apt-get -y -qq autoremove >/dev/null' 2>&1
         $set = @($o | Where-Object { $_ -like 'Setting up*' })
         $err = @($o | Where-Object { $_ -like 'E:*' })
         if ($set.Count) { "    ↑ $d`: $($set.Count) Pakete aktualisiert" } else { "  ✓ $d aktuell" }
@@ -196,29 +236,30 @@ $jobScripts.dev = {
     if (Get-Command choco -EA SilentlyContinue) {
         "… choco upgrade all"
         $o = choco upgrade all -y --no-progress 2>&1 | Out-String
-        ($o -split "`r?`n") | Where-Object { $_ -match 'upgraded \d+/\d+|^ - ' } | ForEach-Object { "  $($_.Trim())" }
+        ($o -split "`r?`n") | Where-Object { $_ -match 'upgraded \d+/\d+|^ - ' -and $_ -notmatch 'pending system reboot' } | ForEach-Object { "  $($_.Trim())" }
     }
 }
-
-# --- Neustart-Wächter (bricht angekündigte Shutdowns während des Laufs ab) -----
-$guard = Start-Job { while ($true) { shutdown.exe /a 2>$null | Out-Null; Start-Sleep 3 } }
 
 # --- Jobs starten ---------------------------------------------------------------
 $snapB = Join-Path $logDir "winget-before-$stamp.xml"
 $snapA = Join-Path $logDir "winget-after-$stamp.xml"
 $running = @{}
 $start = Get-Date
-foreach ($j in $jobs) {
+
+function Start-SysupJob($j) {
     $log = Join-Path $logDir "$j-$stamp.log"
     $args_ = switch ($j) {
         'winget'   { ,@($wingetSkip, $selfHosted, $snapB, $snapA) }
         'dotfiles' { ,@(,(Join-Path $userHome 'Projects\dotfiles')) }
         default    { ,@() }
     }
-    $running[$j] = @{
+    $script:running[$j] = @{
         Log = $log
         Job = Start-Job -Name "sysup-$j" -ScriptBlock {
             param($sb, $a, $log)
+            # Jobs erben sonst Codepage 850 -> git/winget-Umlaute und ↑ kämen kaputt an
+            [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+            $env:WSL_UTF8 = '1'
             $sb = [scriptblock]::Create($sb)
             try { & $sb @a *>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $log -Append | Out-Null; "__SYSUP_RC=0" | Add-Content $log }
             catch { "  ✗ Abbruch: $_" | Add-Content $log; "__SYSUP_RC=1" | Add-Content $log }
@@ -226,22 +267,40 @@ foreach ($j in $jobs) {
     }
 }
 
-# Fortschritt: letzte Zeile je Job
-while ($running.Values.Job | Where-Object State -eq 'Running') {
-    $lines = foreach ($j in $jobs) {
-        $st = $running[$j].Job.State
-        $last = if (Test-Path $running[$j].Log) { (Get-Content $running[$j].Log -Tail 1 -EA SilentlyContinue) } else { 'startet …' }
-        $icon = if ($st -eq 'Running') { '⏳' } else { '✓' }
-        '{0} {1,-9} {2}' -f $icon, $j, ("$last" -replace '^\s+','').Substring(0, [Math]::Min(90, ("$last" -replace '^\s+','').Length))
+# dev (choco) erst nach winget: parallele MSI-Installer scheitern mit 1618
+$deferred = if ('dev' -in $jobs -and 'winget' -in $jobs) { 'dev' } else { $null }
+
+try {
+    # Neustart-Wächter: bricht angekündigte Shutdowns während des Laufs ab
+    Start-Job -Name 'sysup-guard' { while ($true) { shutdown.exe /a 2>$null | Out-Null; Start-Sleep 3 } } | Out-Null
+
+    foreach ($j in $jobs) { if ($j -ne $deferred) { Start-SysupJob $j } }
+
+    # Fortschritt: ein Balken je Job mit dessen letzter Logzeile
+    while ($deferred -or ($running.Values.Job | Where-Object State -eq 'Running')) {
+        if ($deferred -and $running.winget.Job.State -ne 'Running') { Start-SysupJob $deferred; $deferred = $null }
+        $secs = [int]((Get-Date) - $start).TotalSeconds
+        for ($i = 0; $i -lt $jobs.Count; $i++) {
+            $j = $jobs[$i]
+            if (-not $running.ContainsKey($j)) { $st = 'wartet auf winget'; $last = '' }
+            else {
+                $st = if ($running[$j].Job.State -eq 'Running') { "läuft ($secs s)" } else { 'fertig' }
+                $last = if (Test-Path $running[$j].Log) { "$(Get-Content $running[$j].Log -Tail 1 -EA SilentlyContinue)".Trim() } else { 'startet …' }
+            }
+            Write-Progress -Id ($i + 1) -Activity $j -Status $st -CurrentOperation $last
+        }
+        Start-Sleep 2
     }
-    Write-Progress -Activity "sysup ($([int]((Get-Date)-$start).TotalSeconds)s)" -Status ($lines -join '  |  ')
-    Start-Sleep 2
+} finally {
+    # auch bei Ctrl+C: Wächter und laufende Jobs nicht als Leichen zurücklassen
+    for ($i = 0; $i -lt $jobs.Count; $i++) { Write-Progress -Id ($i + 1) -Activity $jobs[$i] -Completed }
+    Get-Job -Name 'sysup-*' | Where-Object State -eq 'Running' | Stop-Job
+    Get-Job -Name 'sysup-guard' | Remove-Job -Force
 }
-Write-Progress -Activity sysup -Completed
-Stop-Job $guard; Remove-Job $guard -Force
 
 # --- Zusammenfassung ------------------------------------------------------------
 $summary = New-Object System.Collections.Generic.List[string]
+$skipNotes | ForEach-Object { $summary.Add($_) }
 foreach ($j in $jobs) {
     $summary.Add("--- $j ---")
     $log = $running[$j].Log
@@ -265,13 +324,23 @@ foreach ($j in $jobs) {
 }
 $reboot = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or
           (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
-if ($reboot) { $summary.Add('⟳ Neustart ausstehend (sysup startet nie selbst neu)') }
+if ($reboot) { $summary.Add('⟳ Neustart ausstehend – bald bewusst neu starten und Windows im Bootmenü wählen (sysup startet nie selbst neu)') }
 $summary.Add("✓ Done in $([int]((Get-Date)-$start).TotalSeconds)s")
 
 $sumFile = Join-Path $logDir "summary-$stamp.txt"
 $summary | Set-Content $sumFile -Encoding utf8
 foreach ($l in $summary) {
-    $c = switch -Regex ($l) { '^---' { 'White' } '↑' { 'Cyan' } '^\s*\+' { 'Green' } '−|✗' { 'Red' } '!|⊘|⟳' { 'Yellow' } 'volles Log' { 'DarkGray' } default { 'Gray' } }
+    $c = switch -Regex ($l) {
+        '^---'        { 'White'; break }
+        'volles Log'  { 'DarkGray'; break }
+        '✗'           { 'Red'; break }
+        '^\s*↑'       { 'Cyan'; break }
+        '^\s*\+'      { 'Green'; break }
+        '^\s*−'       { 'Red'; break }
+        '!|⊘|⟳'       { 'Yellow'; break }
+        '↑'           { 'Cyan'; break }
+        default       { 'Gray' }
+    }
     Write-Host $l -ForegroundColor $c
 }
 Write-Host "(Zusammenfassung: $sumFile)" -ForegroundColor DarkGray

@@ -1,6 +1,9 @@
-# Wach-Wächter: hält den PC wach und bricht angekündigte Neustarts/Shutdowns ab
-# (z.B. von Installern). Gedacht für unbeaufsichtigte Läufe, etwa per Fernsteuerung,
-# weil ein Neustart in Gentoo landet (Bootreihenfolge bleibt so).
+#Requires -Version 7
+# Wach-Wächter: hält den PC wach und bricht angekündigte (zeitverzögerte)
+# Neustarts/Shutdowns ab, z.B. von Installern. Sofortige Neustarts
+# (shutdown /t 0, ExitWindowsEx) kann er nicht verhindern.
+# Gedacht für unbeaufsichtigte Läufe, etwa per Fernsteuerung, weil ein Neustart
+# in Gentoo landet (Bootreihenfolge bleibt so).
 #
 # Starten:  Start-Process pwsh -WindowStyle Hidden -ArgumentList '-NoProfile','-File',"$env:USERPROFILE\scripts\stay-awake.ps1"
 # Beenden:  New-Item "$env:USERPROFILE\scripts\stay-awake.stop"   (oder Prozess beenden)
