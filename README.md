@@ -62,3 +62,23 @@ chezmoi reads `/etc/os-release` to set a `distro` variable (`fedora` or `gentoo`
 chezmoi data | grep distro
 # "distro": "gentoo"
 ```
+
+## Windows (dual boot)
+
+`windows/` is not managed by chezmoi (see `.chezmoiignore`). It holds the Windows side of the Battlestation:
+
+| File | Notes |
+|---|---|
+| `windows/sysup.ps1` | Windows counterpart of `sysup`: winget, Windows Update incl. drivers, Store, Defender, WSL (+ apt in the distros), rustup/npm/scoop/choco, and `git pull` of this repo. Runs jobs in parallel, writes a summary like the Linux version, **never reboots**. |
+| `windows/winget-skip.txt` | winget IDs that sysup leaves alone (with reason) |
+| `windows/stay-awake.ps1` | Keeps the PC awake and aborts pending shutdowns, for unattended runs |
+| `windows/install.ps1` | Symlinks the scripts to `%USERPROFILE%\scripts`, adds `sysup` to the PowerShell profile, blocks automatic restarts after updates, sets the RTC to UTC |
+
+```powershell
+git clone ssh://git@git.joshuahirsig.xyz:5478/joshii/dotfiles.git $env:USERPROFILE\Projects\dotfiles
+pwsh -File $env:USERPROFILE\Projects\dotfiles\windows\install.ps1   # elevated
+sysup                     # everything
+sysup -Skip store         # e.g. skip a job
+```
+
+Why no automatic restarts: the boot order starts Gentoo, so an unattended reboot would not come back to Windows. The hardware clock is UTC on both systems (`RealTimeIsUniversal` on Windows, `clock="UTC"` in Gentoo's `/etc/conf.d/hwclock`).

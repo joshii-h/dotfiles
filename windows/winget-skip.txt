@@ -1,0 +1,2 @@
+# winget-IDs, die sysup NICHT aktualisiert (eine pro Zeile, Text nach # = Begründung)
+TeamSpeakSystems.TeamSpeakClient.Beta.6   # winget kennt die installierte Beta-Version falsch (5.0.0) -> würde downgraden

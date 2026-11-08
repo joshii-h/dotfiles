@@ -1,6 +1,8 @@
 README.md
 LICENSE
 msteams-pwa-handler/**
+# Windows-Seite der Dualboot-Battlestation, eingerichtet per windows/install.ps1
+windows/**
 
 # sysup-Helfer sind Gentoo-spezifisch (emerge, eclean-kernel, grub-mkconfig).
 {{- if ne .distro "gentoo" }}
