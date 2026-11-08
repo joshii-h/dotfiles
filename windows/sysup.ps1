@@ -288,7 +288,9 @@ try {
                 $st = if ($running[$j].Job.State -eq 'Running') { "läuft ($secs s)" } else { 'fertig' }
                 $last = if (Test-Path $running[$j].Log) { "$(Get-Content $running[$j].Log -Tail 1 -EA SilentlyContinue)".Trim() } else { 'startet …' }
             }
-            Write-Progress -Id ($i + 1) -Activity $j -Status $st -CurrentOperation $last
+            # die kompakte Fortschrittsanzeige von pwsh 7 zeigt nur Activity + Status -> letzte Logzeile anhängen
+            $txt = if ($last -and $running[$j].Job.State -eq 'Running') { "$st – $($last -replace '^[…\s]+','')" } else { $st }
+            Write-Progress -Id ($i + 1) -Activity $j.PadRight(8) -Status $txt.Substring(0, [Math]::Min(80, $txt.Length))
         }
         Start-Sleep 2
     }
