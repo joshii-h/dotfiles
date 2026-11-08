@@ -15,7 +15,9 @@
     store     Microsoft-Store-Apps (Store-Updatescan anstossen)
     defender  Defender-Signaturen
     wsl       WSL-Kernel + apt in allen WSL-Distros
-    dev       rustup, npm -g, scoop, choco (startet erst nach winget, damit sich
+    dev       rustup, npm -g, scoop, pip (alle Pythons; Umgebungen mit lokalen
+              Builds wie torch+rocm nur melden), cargo install-update, dotnet tools,
+              bun, PowerShell-Module, choco (startet erst nach winget, damit sich
               die MSI-Installer nicht gegenseitig blockieren)
 
   Logs und Zusammenfassungen: %LOCALAPPDATA%\sysup (die letzten 10 Läufe).
@@ -193,7 +195,12 @@ $jobScripts.store = {
 
 $jobScripts.defender = {
     $before = (Get-MpComputerStatus).AntivirusSignatureVersion
-    try { Update-MpSignature -EA Stop } catch { "  ✗ $($_.Exception.Message)"; return }
+    # schlägt gern fehl, wenn Windows gerade selbst aktualisiert -> einmal wiederholen
+    try { Update-MpSignature -EA Stop }
+    catch {
+        "… $($_.Exception.Message) – neuer Versuch in 15 s"; Start-Sleep 15
+        try { Update-MpSignature -EA Stop } catch { "  ✗ $($_.Exception.Message)"; return }
+    }
     $after = (Get-MpComputerStatus).AntivirusSignatureVersion
     if ($before -ne $after) { "    ↑ Defender-Signaturen  $before → $after" } else { "  ✓ Defender-Signaturen aktuell ($after)" }
 }
@@ -237,6 +244,61 @@ $jobScripts.dev = {
         $o = scoop update '*' *>&1 | Out-String
         ($o -split "`r?`n") | Where-Object { $_ -match "^Updating '|was updated from" } | ForEach-Object { "    ↑ scoop: $($_.Trim())" }
         if ($o -match 'Latest versions for all apps are installed') { "  ✓ Scoop-Apps aktuell" }
+    }
+    if (Get-Command py -EA SilentlyContinue) {
+        # alle Pythons, die der Launcher kennt. Umgebungen mit lokalen Builds (Version
+        # mit "+", z.B. torch+rocm) nur melden: ein Upgrade würde sie durch PyPI-Builds ersetzen
+        $pys = py -0p 2>$null | ForEach-Object { if ($_ -match '-V:(\S+)\s+\*?\s*(\S.*)$') { [pscustomobject]@{ V = $Matches[1]; Exe = $Matches[2].Trim() } } }
+        foreach ($p in $pys) {
+            "… pip (Python $($p.V))"
+            $json = & $p.Exe -m pip list --outdated --format=json --disable-pip-version-check 2>$null | Out-String
+            $old = @(if ($json.Trim()) { $json | ConvertFrom-Json })
+            if (-not $old.Count) { "  ✓ pip $($p.V): aktuell"; continue }
+            $local = @(& $p.Exe -m pip list --format=freeze 2>$null | Where-Object { $_ -match '==.*\+' } | ForEach-Object { ($_ -split '==')[0] })
+            if ($local.Count) {
+                "  ⊘ pip $($p.V): $($old.Count) Pakete veraltet, nicht aktualisiert (lokale Builds: $($local -join ', '))"
+                continue
+            }
+            $o = & $p.Exe -m pip install -U --disable-pip-version-check -q @($old.name) 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) { "  ✗ pip $($p.V): $(($o.Trim() -split "`r?`n")[-1])" }
+            foreach ($q in $old) { "    ↑ pip $($p.V): $($q.name)  $($q.version) → $($q.latest_version)" }
+            $chk = & $p.Exe -m pip check 2>&1
+            if ($LASTEXITCODE -ne 0) { $chk | ForEach-Object { "  ! pip $($p.V): $_" } }
+        }
+    }
+    if (Get-Command cargo-install-update -EA SilentlyContinue) {
+        "… cargo install-update -a"
+        $o = cargo install-update -a 2>&1 | Out-String
+        $ups = ($o -split "`r?`n") | Where-Object { $_ -match '^\s*Upgrading \S+ from' -or $_ -match '^\S+\s+v\S+\s+v\S+\s+Yes' }
+        if ($ups) { $ups | ForEach-Object { "    ↑ cargo: $($_.Trim())" } } else { "  ✓ cargo-Programme aktuell" }
+    }
+    if (Get-Command dotnet -EA SilentlyContinue) {
+        $tools = @(dotnet tool list -g 2>$null | Select-Object -Skip 2 | Where-Object { $_.Trim() })
+        if ($tools.Count) {
+            "… dotnet tool update"
+            $o = dotnet tool update -g --all 2>&1 | Out-String
+            ($o -split "`r?`n") | Where-Object { $_ -match 'was successfully updated' } | ForEach-Object { "    ↑ dotnet: $($_.Trim())" }
+            if ($o -notmatch 'was successfully updated') { "  ✓ .NET-Tools aktuell" }
+        }
+    }
+    if (Get-Command bun -EA SilentlyContinue) {
+        "… bun upgrade"
+        $o = bun upgrade 2>&1 | Out-String
+        if ($o -match 'Upgraded') { "    ↑ bun: $((($o.Trim() -split "`r?`n") | Where-Object { $_ -match 'Upgraded' } | Select-Object -First 1).Trim())" } else { "  ✓ bun aktuell" }
+        bun update -g 2>&1 | Select-Object -Last 3
+    }
+    if (Get-Command Update-PSResource -EA SilentlyContinue) {
+        "… PowerShell-Module"
+        foreach ($scope in 'CurrentUser', 'AllUsers') {
+            foreach ($m in @(Get-InstalledPSResource -Scope $scope -EA SilentlyContinue | Group-Object Name)) {
+                $cur = ($m.Group | Sort-Object Version -Descending | Select-Object -First 1).Version
+                $latest = (Find-PSResource $m.Name -EA SilentlyContinue).Version
+                if ($latest -and $latest -gt $cur) {
+                    try { Update-PSResource $m.Name -Scope $scope -TrustRepository -EA Stop; "    ↑ Modul: $($m.Name)  $cur → $latest" }
+                    catch { "  ! Modul $($m.Name): $($_.Exception.Message)" }
+                }
+            }
+        }
     }
     if (Get-Command choco -EA SilentlyContinue) {
         "… choco upgrade all"

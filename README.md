@@ -69,7 +69,7 @@ chezmoi data | grep distro
 
 | File | Notes |
 |---|---|
-| `windows/sysup.ps1` | Windows counterpart of `sysup`: winget, Windows Update incl. drivers (feature upgrades are skipped), Store, Defender, WSL (+ apt in the distros), rustup/npm/scoop/choco, and `git pull` of this repo. Runs jobs in parallel (choco waits for winget to avoid MSI conflicts), writes a summary like the Linux version, **never reboots**. Needs PowerShell 7 and the `Microsoft.WinGet.Client` module. |
+| `windows/sysup.ps1` | Windows counterpart of `sysup`: winget, Windows Update incl. drivers (feature upgrades are skipped), Store, Defender, WSL (+ apt in the distros), rustup/npm/scoop/choco, pip for every Python the `py` launcher knows (environments with local builds such as `torch+rocm` are only reported, never upgraded), cargo-update, .NET global tools, bun, PowerShell modules, and `git pull` of this repo. Runs jobs in parallel (choco waits for winget to avoid MSI conflicts), writes a summary like the Linux version, **never reboots**. Needs PowerShell 7 and the `Microsoft.WinGet.Client` module. |
 | `windows/winget-skip.txt` | winget IDs that sysup leaves alone (with reason). IDs prefixed with `~` (vendor/driver installers that may restart immediately) only run with `sysup -Attended` |
 | `windows/stay-awake.ps1` | Keeps the PC awake and aborts *announced* (timed) shutdowns, for unattended runs. Immediate restarts by an installer cannot be caught |
 | `windows/install.ps1` | Symlinks the scripts to `%USERPROFILE%\scripts`, adds `sysup` to the PowerShell profile, installs `Microsoft.WinGet.Client`, sets Windows Update to download-and-notify (it never installs or restarts by itself; sysup installs), sets the RTC to UTC |
