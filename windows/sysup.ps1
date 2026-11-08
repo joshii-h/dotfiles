@@ -232,6 +232,7 @@ $jobScripts.dev = {
         scoop update 2>&1 | Out-Null
         $o = scoop update '*' 2>&1 | Out-String
         ($o -split "`r?`n") | Where-Object { $_ -match "^Updating '|was updated from" } | ForEach-Object { "    ↑ scoop: $($_.Trim())" }
+        if ($o -match 'Latest versions for all apps are installed') { "  ✓ Scoop-Apps aktuell" }
     }
     if (Get-Command choco -EA SilentlyContinue) {
         "… choco upgrade all"
