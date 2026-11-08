@@ -40,6 +40,13 @@ if (-not ((Test-Path $ctt) -and (Select-String -Path $ctt -Pattern 'function sys
     Add-Content $ctt "`n# sysup – Windows-Gegenstück zum Linux-sysup (dotfiles/windows)`nfunction sysup { & `"`$env:USERPROFILE\scripts\sysup.ps1`" @args }"
     "  + sysup in $ctt"
 } else { "  = sysup schon in $ctt" }
+# Windows PowerShell 5.1 hat ein eigenes Profil -> dort an pwsh weiterreichen
+$ps5 = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Microsoft.PowerShell_profile.ps1'
+if (-not ((Test-Path $ps5) -and (Select-String -Path $ps5 -Pattern 'function sysup' -Quiet))) {
+    New-Item -ItemType Directory -Force (Split-Path $ps5) | Out-Null
+    Add-Content $ps5 "`n# sysup – Windows-Gegenstück zum Linux-sysup (dotfiles/windows); braucht PowerShell 7`nfunction sysup { pwsh -NoProfile -File `"`$env:USERPROFILE\scripts\sysup.ps1`" @args }"
+    "  + sysup in $ps5 (leitet an pwsh weiter)"
+} else { "  = sysup schon in $ps5" }
 
 'winget-Modul:'
 if (Get-Module -ListAvailable Microsoft.WinGet.Client) { '  = Microsoft.WinGet.Client vorhanden' }
