@@ -154,7 +154,10 @@ $jobScripts.windows = {
     "… suche Updates (Software + Treiber)"
     try { $r = $searcher.Search("IsInstalled=0 and IsHidden=0") } catch { "  ✗ Suche fehlgeschlagen: $_"; return }
     $todo = New-Object -ComObject Microsoft.Update.UpdateColl
+    $pending = 0
     foreach ($u in $r.Updates) {
+        # schon installiert, wartet nur auf den Neustart (zählt bis dahin als "nicht installiert")
+        if ($u.RebootRequired) { "  ⟳ wartet auf Neustart: $($u.Title)"; $pending++; continue }
         # Feature-Upgrades brauchen mehrere Neustarts und stellen gern die Bootreihenfolge um
         if (@($u.Categories | ForEach-Object Name) -contains 'Upgrades') { "  ⊘ Feature-Upgrade übersprungen (manuell einspielen): $($u.Title)"; continue }
         # Treiber (Type 2) markieren sich oft als "kann Eingabe verlangen", installieren aber still
@@ -162,7 +165,7 @@ $jobScripts.windows = {
         if (-not $u.EulaAccepted) { $u.AcceptEula() }
         [void]$todo.Add($u)
     }
-    if ($todo.Count -eq 0) { "  ✓ Windows ist aktuell"; return }
+    if ($todo.Count -eq 0) { if (-not $pending) { "  ✓ Windows ist aktuell" }; return }
     "… lade $($todo.Count) Updates"
     $d = $s.CreateUpdateDownloader(); $d.Updates = $todo; [void]$d.Download()
     $inst = New-Object -ComObject Microsoft.Update.UpdateColl
@@ -229,8 +232,9 @@ $jobScripts.dev = {
     }
     if (Get-Command scoop -EA SilentlyContinue) {
         "… scoop update"
-        scoop update 2>&1 | Out-Null
-        $o = scoop update '*' 2>&1 | Out-String
+        # scoop schreibt per Write-Host -> *>&1, sonst landet nichts in $o
+        scoop update *>&1 | Out-Null
+        $o = scoop update '*' *>&1 | Out-String
         ($o -split "`r?`n") | Where-Object { $_ -match "^Updating '|was updated from" } | ForEach-Object { "    ↑ scoop: $($_.Trim())" }
         if ($o -match 'Latest versions for all apps are installed') { "  ✓ Scoop-Apps aktuell" }
     }
