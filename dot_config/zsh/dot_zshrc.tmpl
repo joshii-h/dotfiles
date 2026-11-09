@@ -841,7 +841,7 @@ sysup() {
   # NO_BG_NICE: sonst liefen flatpak/chezmoi/ai mit nice +5 (emerge regelt
   # seine Prioritaet selbst ueber PORTAGE_NICENESS).
   setopt LOCAL_OPTIONS LOCAL_TRAPS NO_NOTIFY NO_MONITOR NO_BG_NICE
-  local -a names=(emerge flatpak dotfiles proton-ge ai steam firmware rice)
+  local -a names=(emerge flatpak dotfiles proton-ge ai steam firmware rice tools)
   # Das emerge-Log und die komplette Zusammenfassung bleiben liegen (je die
   # letzten 10 Laeufe): nach sysup-shutdown ist das Terminal weg, ohne
   # gespeicherte Zusammenfassung blieben Fehler von flatpak/ai/proton unsichtbar.
@@ -997,6 +997,12 @@ if devs:
       $HOME/.local/bin/grub-theme; r4=$?
       exit $(( r1 || r2 || r3 || r4 ))' &>"${logs[8]}" &!
     pids+=($!)
+    # "tools": Kommandozeilen-Werkzeuge ausserhalb von Portage, per go install
+    # gebaut (vt = VirusTotal-CLI). Wartet auf dotfiles, damit ein frisch
+    # synchronisiertes vt-update schon gilt.
+    setsid zsh -fc 'while kill -0 $1 2>/dev/null; do sleep 2; done
+      exec $HOME/.local/bin/vt-update' _ $dotfiles_pid &>"${logs[9]}" &!
+    pids+=($!)
     _sysup_lock_update $lock $$ $pids
     trap "_sysup_lock_update ${(q)lock} $pids" EXIT
     local lines=$(( ${#names} + 2 ))
@@ -1069,7 +1075,7 @@ if devs:
     rm -f ${logs[3,-1]}
     local -a stale=( $logdir/emerge-*.log(Nom[11,-1]) $logdir/flatpak-*.log(Nom[11,-1])
                      $logdir/summary-*.txt(Nom[11,-1]) $logdir/shutdown-*.log(Nom[11,-1])
-                     $logdir/(dotfiles|proton-ge|ai|steam|firmware|rice)-*.log(Nmh+24) )
+                     $logdir/(dotfiles|proton-ge|ai|steam|firmware|rice|tools)-*.log(Nmh+24) )
     (( $#stale )) && rm -f $stale
     printf "\n\033[1;32m✓ Done in %ds\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$((SECONDS - start))" "$summary"
   } always {

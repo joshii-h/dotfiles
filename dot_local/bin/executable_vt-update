@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#
+# vt-update — hält vt-cli (VirusTotal-Kommandozeile) aktuell.
+#
+# vt-cli gibt es weder in Portage noch als passendes Release: es wird per
+# `go install` aus dem neuesten Stand von VirusTotal/vt-cli nach ~/.local/bin
+# gebaut. Ist vt nicht installiert, tut das Skript nichts.
+#
+#   vt-update           # neu bauen, falls upstream neuer ist
+#   vt-update --force   # neu bauen, auch wenn schon aktuell
+#
+set -euo pipefail
+
+MOD="github.com/VirusTotal/vt-cli"
+BIN="$HOME/.local/bin/vt"
+
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    --force)   FORCE=1 ;;
+    -h|--help) sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf '\033[1;31mEE\033[0m Unbekannte Option: %s\n' "$arg" >&2; exit 2 ;;
+  esac
+done
+
+info() { printf '\033[1;34m::\033[0m %s\n' "$*"; }
+err()  { printf '\033[1;31mEE\033[0m %s\n' "$*" >&2; }
+
+[ -x "$BIN" ] || { info "vt nicht installiert – übersprungen."; exit 0; }
+command -v go >/dev/null || { err "go fehlt – vt kann nicht gebaut werden."; exit 1; }
+
+info "Ermittle neuesten vt-cli-Stand ..."
+NEW=$(timeout 120 go list -m -f '{{.Version}}' "${MOD}@latest") \
+  || { err "Konnte den neuesten Stand nicht ermitteln."; exit 1; }
+CUR=$(go version -m "$BIN" 2>/dev/null | awk -v m="$MOD" '$1 == "mod" && $2 == m {print $3}')
+
+if [ "$CUR" = "$NEW" ] && [ "$FORCE" -eq 0 ]; then
+  info "vt ${CUR} ist aktuell."
+  exit 0
+fi
+info "Aktualisiere vt ${CUR:-(unbekannt)} → ${NEW} ..."
+# Version per ldflags setzen, sonst zeigt `vt version` nichts an.
+GOBIN="$(dirname "$BIN")" timeout 600 go install \
+  -ldflags "-X ${MOD}/cmd.Version=${NEW}" "${MOD}/vt@${NEW}"
+info "Installiert: vt ${NEW}"
