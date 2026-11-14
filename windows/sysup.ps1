@@ -246,54 +246,77 @@ $jobScripts.dev = {
         if ($o -match 'Latest versions for all apps are installed') { "  ✓ Scoop-Apps aktuell" }
     }
     if (Get-Command py -EA SilentlyContinue) {
-        # alle Pythons, die der Launcher kennt. Umgebungen mit lokalen Builds (Version
-        # mit "+", z.B. torch+rocm) nur melden: ein Upgrade würde sie durch PyPI-Builds ersetzen
+        # alle Pythons, die der Launcher kennt. Lokale Builds (Version mit "+", z.B. torch+rocm)
+        # werden per Constraint festgehalten, der Rest wird aktualisiert. Pakete, die beim Upgrade
+        # eine Abhängigkeit brechen, werden zurückgesetzt und 14 Tage gesperrt (holds-Datei),
+        # damit nicht jeder Lauf dasselbe hoch- und wieder runterzieht.
+        $norm = { param($n) ($n -replace '[-_.]+', '-').ToLowerInvariant() }
+        $freeze = { param($exe) $h = @{}; & $exe -m pip list --format=freeze --disable-pip-version-check 2>$null | ForEach-Object { if ($_ -match '^([^=\s]+)==(.+)$') { $h[(& $norm $Matches[1])] = $Matches[2] } }; $h }
         $pys = py -0p 2>$null | ForEach-Object { if ($_ -match '-V:(\S+)\s+\*?\s*(\S.*)$') { [pscustomobject]@{ V = $Matches[1]; Exe = $Matches[2].Trim() } } }
         foreach ($p in $pys) {
             "… pip (Python $($p.V))"
+            $holdDir = Join-Path $env:LOCALAPPDATA 'sysup'; New-Item -ItemType Directory -Force $holdDir | Out-Null
+            $holdFile = Join-Path $holdDir "pip-holds-$($p.V).txt"
+            $holds = @{}
+            if (Test-Path $holdFile) {
+                Get-Content $holdFile | ForEach-Object { if ($_ -match '^(\S+)==(\S+)\s+(\d{4}-\d{2}-\d{2})$' -and ([datetime]$Matches[3]) -gt (Get-Date).AddDays(-14)) { $holds[$Matches[1]] = @($Matches[2], $Matches[3]) } }
+            }
             $json = & $p.Exe -m pip list --outdated --format=json --disable-pip-version-check 2>$null | Out-String
             $old = @(if ($json.Trim()) { $json | ConvertFrom-Json })
-            if (-not $old.Count) { "  ✓ pip $($p.V): aktuell"; continue }
-            # lokale Builds (z.B. torch+rocm) per Constraint-Datei festhalten, Rest normal upgraden.
-            # Was eine neuere torch braucht, hält pip dadurch automatisch zurück.
-            $localPins = @(& $p.Exe -m pip list --format=freeze 2>$null | Where-Object { $_ -match '==.*\+' })
+            $before = & $freeze $p.Exe
+            $localPins = @($before.Keys | Where-Object { $before[$_] -match '\+' } | Sort-Object | ForEach-Object { "$_==$($before[$_])" })
             $local = @($localPins | ForEach-Object { ($_ -split '==')[0] })
-            $todo = @($old | Where-Object { $local -notcontains $_.name })
             if ($local.Count) { "  ⊘ pip $($p.V): festgehalten (lokale Builds): $($local -join ', ')" }
-            if (-not $todo.Count) { continue }
-            $pipArgs = @('-m', 'pip', 'install', '-U', '--disable-pip-version-check', '-q')
-            if ($localPins.Count) {
-                $cons = Join-Path $env:TEMP "sysup-pip-constraints-$($p.V).txt"
-                $localPins | Set-Content -Encoding ascii $cons
-                $pipArgs += @('-c', $cons)
-            }
-            $before = @{}; & $p.Exe -m pip list --format=freeze 2>$null | ForEach-Object { $k, $v = $_ -split '==', 2; $before[$k] = $v }
+            if ($holds.Count) { "  ⊘ pip $($p.V): gesperrt nach Konflikt: $(($holds.Keys | Sort-Object) -join ', ')" }
+            $todo = @($old | Where-Object { $n = & $norm $_.name; $local -notcontains $n -and -not $holds.ContainsKey($n) })
+            if (-not $todo.Count) { if (-not $old.Count) { "  ✓ pip $($p.V): aktuell" }; continue }
+            $cons = Join-Path $env:TEMP "sysup-pip-constraints-$($p.V).txt"
+            @($localPins) + @($holds.Keys | ForEach-Object { "$_==$($holds[$_][0])" }) | Set-Content -Encoding ascii $cons
+            $pipArgs = @('-m', 'pip', 'install', '-U', '--disable-pip-version-check', '-q', '-c', $cons)
             $o = & $p.Exe @pipArgs @($todo.name) 2>&1 | Out-String
-            $pipRc = $LASTEXITCODE
-            if ($pipRc -ne 0) {
-                # Konflikt (z.B. Paket will neuere torch): einzeln nachziehen, damit nicht alles blockiert
-                "  ! pip $($p.V): Sammel-Upgrade fehlgeschlagen ($(($o.Trim() -split "`r?`n")[-1])), versuche einzeln"
-                foreach ($q in $todo) { & $p.Exe @pipArgs $q.name *> $null }
-            }
-            $after = @{}; & $p.Exe -m pip list --format=freeze 2>$null | ForEach-Object { $k, $v = $_ -split '==', 2; $after[$k] = $v }
-            $changed = @($todo | Where-Object { $after[$_.name] -and $after[$_.name] -ne $before[$_.name] })
-            foreach ($q in $changed) { "    ↑ pip $($p.V): $($q.name)  $($before[$q.name]) → $($after[$q.name])" }
-            $held = @($todo | Where-Object { $after[$_.name] -eq $before[$_.name] })
-            if ($held.Count) { "  ⊘ pip $($p.V): zurückgehalten (Abhängigkeiten): $($held.name -join ', ')" }
-            $chk = & $p.Exe -m pip check 2>&1
             if ($LASTEXITCODE -ne 0) {
-                # Upgrade hat eine Abhängigkeit gebrochen ("..., but you have X 1.2"): X auf alte Version zurück
-                $broken = @($chk | ForEach-Object { if ("$_" -match 'but you have (\S+) ') { $Matches[1] } } | Sort-Object -Unique)
-                foreach ($b in $broken) {
-                    $k = @($before.Keys | Where-Object { $_ -ieq $b -or ($_ -replace '[-_.]', '-') -ieq ($b -replace '[-_.]', '-') })[0]
-                    if ($k -and $before[$k] -ne $after[$k]) {
-                        & $p.Exe -m pip install --disable-pip-version-check -q "$k==$($before[$k])" *> $null
-                        "  ↩ pip $($p.V): $k zurück auf $($before[$k]) (Konflikt)"
-                    }
+                # Sammel-Upgrade scheitert schon an einem Konflikt: einzeln nachziehen
+                "  ! pip $($p.V): Sammel-Upgrade fehlgeschlagen ($(($o.Trim() -split "`r?`n")[-1])), versuche einzeln"
+                foreach ($q in $todo) {
+                    $o = & $p.Exe @pipArgs $q.name 2>&1 | Out-String
+                    if ($LASTEXITCODE -ne 0) { "  ✗ pip $($p.V): $($q.name): $(($o.Trim() -split "`r?`n")[-1])" }
                 }
-                $chk = & $p.Exe -m pip check 2>&1
-                if ($LASTEXITCODE -ne 0) { $chk | ForEach-Object { "  ! pip $($p.V): $_" } }
             }
+            # pip check: "A 1.0 has requirement Y<2, but you have Y 2.1" -> das geänderte Paket zurücksetzen
+            # (A, falls A neu ist und Y unverändert; sonst Y). Bis zu 3 Durchgänge.
+            $rolled = @{}
+            for ($i = 0; $i -lt 3; $i++) {
+                $after = & $freeze $p.Exe
+                $chk = @(& $p.Exe -m pip check --disable-pip-version-check 2>&1)
+                if ($LASTEXITCODE -eq 0) { break }
+                $targets = @($chk | ForEach-Object {
+                    if ("$_" -match '^(\S+) \S+ has requirement .*but you have (\S+) ') {
+                        $a = & $norm $Matches[1]; $y = & $norm $Matches[2]
+                        if ($before[$y] -and $before[$y] -ne $after[$y]) { $y }
+                        elseif ($before[$a] -and $before[$a] -ne $after[$a]) { $a }
+                    } elseif ("$_" -match '^(\S+) \S+ requires (\S+), which is not installed') {
+                        $a = & $norm $Matches[1]; if ($before[$a] -and $before[$a] -ne $after[$a]) { $a }
+                    }
+                } | Where-Object { $_ -and -not $rolled.ContainsKey($_) } | Sort-Object -Unique)
+                if (-not $targets.Count) { break }
+                foreach ($t in $targets) {
+                    $o = & $p.Exe -m pip install --disable-pip-version-check -q -c $cons "$t==$($before[$t])" 2>&1 | Out-String
+                    if ($LASTEXITCODE -eq 0) { $rolled[$t] = $before[$t] }
+                    else { "  ✗ pip $($p.V): Zurücksetzen von $t fehlgeschlagen: $(($o.Trim() -split "`r?`n")[-1])"; $rolled[$t] = $null }
+                }
+            }
+            $after = & $freeze $p.Exe
+            foreach ($t in $rolled.Keys) { if ($rolled[$t]) { $holds[$t] = @($rolled[$t], (Get-Date -Format 'yyyy-MM-dd')) } }
+            $holds.Keys | Sort-Object | ForEach-Object { "$_==$($holds[$_][0]) $($holds[$_][1])" } | Set-Content -Encoding ascii $holdFile
+            foreach ($q in $todo) {
+                $n = & $norm $q.name
+                if ($rolled.ContainsKey($n)) { "  ↩ pip $($p.V): $($q.name) bleibt auf $($before[$n]) (Konflikt, 14 Tage gesperrt)" }
+                elseif ($after[$n] -and $after[$n] -ne $before[$n]) { "    ↑ pip $($p.V): $($q.name)  $($before[$n]) → $($after[$n])" }
+                else { "  ⊘ pip $($p.V): $($q.name) nicht aktualisiert (Abhängigkeiten oder Fehler)" }
+            }
+            foreach ($t in $rolled.Keys) { if (-not ($todo | Where-Object { (& $norm $_.name) -eq $t })) { "  ↩ pip $($p.V): $t zurück auf $($before[$t]) (Konflikt, 14 Tage gesperrt)" } }
+            $chk = @(& $p.Exe -m pip check --disable-pip-version-check 2>&1)
+            if ($LASTEXITCODE -ne 0) { $chk | ForEach-Object { "  ! pip $($p.V): $_" } }
         }
     }
     if (Get-Command cargo-install-update -EA SilentlyContinue) {
