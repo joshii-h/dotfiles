@@ -688,8 +688,9 @@ _sysup_emerge_summary() {
         printf "  \033[1;31m✗ emerge-Kette nicht regulär beendet (kein Exit-Code im Log - abgeschossen?)\033[0m\n"
       if (rc != 0) {
         # Die Kette bricht beim ersten Fehler ab (&&) - alles danach lief nicht.
-        if      (stage == "world")    skipped = "depclean, eclean-kernel"
-        else if (stage == "depclean") skipped = "eclean-kernel"
+        if      (stage == "world")         skipped = "depclean, eclean-kernel, eclean-dist"
+        else if (stage == "depclean")      skipped = "eclean-kernel, eclean-dist"
+        else if (stage == "eclean-kernel") skipped = "eclean-dist"
         else                          skipped = ""
         if (stage != "") printf "  \033[1;31m✗ emerge-Kette abgebrochen in Stufe %s (Exit-Code %d)\033[0m\n", stage, rc
         else             printf "  \033[1;31m✗ emerge-Kette endete mit Exit-Code %d\033[0m\n", rc
@@ -901,11 +902,15 @@ sysup() {
     # der laufende Kernel wird zusaetzlich immer geschuetzt (z.B. wenn nach einem
     # Rueckfall der Reserve-Kernel laeuft), und ohne -d bleibt alles unangetastet, was
     # GRUB referenziert. Raeumt auch /lib/modules + regeneriert grub.cfg.
+    # eclean-dist -d behaelt nur die Quellen installierter Pakete (Rebuilds
+    # brauchen also keinen Download); -f schuetzt fetch-restricted Dateien, die
+    # von Hand heruntergeladen wurden. Ohne das wuchs distfiles auf 89 GB.
     setsid zsh -fc "$(functions _sysup_sync)"'
       _sysup_sync \
         && echo __SYSUP_STAGE=world         && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world \
         && echo __SYSUP_STAGE=depclean      && command sudo emerge --depclean \
-        && echo __SYSUP_STAGE=eclean-kernel && command sudo eclean-kernel -n 2
+        && echo __SYSUP_STAGE=eclean-kernel && command sudo eclean-kernel -n 2 \
+        && echo __SYSUP_STAGE=eclean-dist   && command sudo eclean-dist -d -f
       rc=$?
       # Leichen in /etc/portage (Eintraege fuer nicht installierte, stabil
       # gewordene oder ungueltige Pakete) nur melden, nie anfassen; aendert

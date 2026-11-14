@@ -77,6 +77,7 @@ busy_tasks() {
   lock_busy                                           && t+=(sysup)
   pgrep -x emerge >/dev/null 2>&1                     && t+=(emerge)
   running '\S*python\S* \S*/eclean-kernel'            && t+=(eclean-kernel)
+  running '\S*python\S* \S*/eclean-dist'              && t+=(eclean-dist)
   running '(ba)?sh \S*/grub-mkconfig|grub-mkconfig'   && t+=(grub-mkconfig)
   running 'flatpak upgrade'                           && t+=(flatpak)
   running 'chezmoi update'                            && t+=(chezmoi)
