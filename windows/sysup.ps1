@@ -254,23 +254,48 @@ $jobScripts.dev = {
             $json = & $p.Exe -m pip list --outdated --format=json --disable-pip-version-check 2>$null | Out-String
             $old = @(if ($json.Trim()) { $json | ConvertFrom-Json })
             if (-not $old.Count) { "  ✓ pip $($p.V): aktuell"; continue }
-            $local = @(& $p.Exe -m pip list --format=freeze 2>$null | Where-Object { $_ -match '==.*\+' } | ForEach-Object { ($_ -split '==')[0] })
-            if ($local.Count) {
-                "  ⊘ pip $($p.V): $($old.Count) Pakete veraltet, nicht aktualisiert (lokale Builds: $($local -join ', '))"
-                continue
+            # lokale Builds (z.B. torch+rocm) per Constraint-Datei festhalten, Rest normal upgraden.
+            # Was eine neuere torch braucht, hält pip dadurch automatisch zurück.
+            $localPins = @(& $p.Exe -m pip list --format=freeze 2>$null | Where-Object { $_ -match '==.*\+' })
+            $local = @($localPins | ForEach-Object { ($_ -split '==')[0] })
+            $todo = @($old | Where-Object { $local -notcontains $_.name })
+            if ($local.Count) { "  ⊘ pip $($p.V): festgehalten (lokale Builds): $($local -join ', ')" }
+            if (-not $todo.Count) { continue }
+            $pipArgs = @('-m', 'pip', 'install', '-U', '--disable-pip-version-check', '-q')
+            if ($localPins.Count) {
+                $cons = Join-Path $env:TEMP "sysup-pip-constraints-$($p.V).txt"
+                $localPins | Set-Content -Encoding ascii $cons
+                $pipArgs += @('-c', $cons)
             }
-            $o = & $p.Exe -m pip install -U --disable-pip-version-check -q @($old.name) 2>&1 | Out-String
+            $before = @{}; & $p.Exe -m pip list --format=freeze 2>$null | ForEach-Object { $k, $v = $_ -split '==', 2; $before[$k] = $v }
+            $o = & $p.Exe @pipArgs @($todo.name) 2>&1 | Out-String
             if ($LASTEXITCODE -ne 0) { "  ✗ pip $($p.V): $(($o.Trim() -split "`r?`n")[-1])" }
-            foreach ($q in $old) { "    ↑ pip $($p.V): $($q.name)  $($q.version) → $($q.latest_version)" }
+            $after = @{}; & $p.Exe -m pip list --format=freeze 2>$null | ForEach-Object { $k, $v = $_ -split '==', 2; $after[$k] = $v }
+            $changed = @($todo | Where-Object { $after[$_.name] -and $after[$_.name] -ne $before[$_.name] })
+            foreach ($q in $changed) { "    ↑ pip $($p.V): $($q.name)  $($before[$q.name]) → $($after[$q.name])" }
+            $held = @($todo | Where-Object { $after[$_.name] -eq $before[$_.name] })
+            if ($held.Count) { "  ⊘ pip $($p.V): zurückgehalten (Abhängigkeiten): $($held.name -join ', ')" }
             $chk = & $p.Exe -m pip check 2>&1
             if ($LASTEXITCODE -ne 0) { $chk | ForEach-Object { "  ! pip $($p.V): $_" } }
         }
     }
     if (Get-Command cargo-install-update -EA SilentlyContinue) {
-        "… cargo install-update -a"
-        $o = cargo install-update -a 2>&1 | Out-String
-        $ups = ($o -split "`r?`n") | Where-Object { $_ -match '^\s*Upgrading \S+ from' -or $_ -match '^\S+\s+v\S+\s+v\S+\s+Yes' }
-        if ($ups) { $ups | ForEach-Object { "    ↑ cargo: $($_.Trim())" } } else { "  ✓ cargo-Programme aktuell" }
+        # Nur prüfen (-l), installiert wird per cargo-binstall: fertige Release-Programme.
+        # Lokal kompilierte .exe blockiert Smart App Control (os error 4551).
+        "… cargo install-update -l"
+        $o = cargo install-update -l 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            "  ✗ cargo: $(($o.Trim() -split "`r?`n")[-1])"
+            if ($o -match '4551|Application Control') { "    → Smart App Control blockiert ein lokal gebautes Programm; neu installieren mit: cargo binstall -y --force <crate>" }
+        } else {
+            $need = @(($o -split "`r?`n") | Where-Object { $_ -match '^(\S+)\s+v\S+\s+v\S+\s+Yes' } | ForEach-Object { ($_ -split '\s+')[0] })
+            if (-not $need.Count) { "  ✓ cargo-Programme aktuell" }
+            elseif (Get-Command cargo-binstall -EA SilentlyContinue) {
+                $o = cargo binstall -y @need 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { "  ✗ cargo binstall: $(($o.Trim() -split "`r?`n")[-1])" }
+                else { $need | ForEach-Object { "    ↑ cargo: $_" } }
+            } else { "  ! cargo: Updates verfügbar ($($need -join ', ')), aber cargo-binstall fehlt" }
+        }
     }
     if (Get-Command dotnet -EA SilentlyContinue) {
         $tools = @(dotnet tool list -g 2>$null | Select-Object -Skip 2 | Where-Object { $_.Trim() })
