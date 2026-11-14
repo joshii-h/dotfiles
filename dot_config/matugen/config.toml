@@ -38,3 +38,14 @@ output_path = "~/.cache/matugen/rgb-palette.json"
 [templates.claude-statusline]
 input_path = "~/.config/matugen/templates/claude-statusline.sh"
 output_path = "~/.cache/matugen/claude-statusline.sh"
+
+# JDownloader (Flatpak): Grundfarben fürs dunkle FlatLaf-Theme (lädt der
+# Java-Agent dms-flatlaf-agent.jar, Quelle ~/.local/share/jdownloader-dms)
+# und JDownloaders eigene Tabellen-/Flächenfarben. Wirkt beim nächsten Start.
+[templates.jdownloader-flatlaf]
+input_path = "~/.config/matugen/templates/jdownloader-flatlaf.properties"
+output_path = "~/.var/app/org.jdownloader.JDownloader/data/jdownloader-dms/FlatDarkLaf.properties"
+
+[templates.jdownloader-laf]
+input_path = "~/.config/matugen/templates/jdownloader-laf.json"
+output_path = "~/.var/app/org.jdownloader.JDownloader/data/jdownloader/cfg/laf/FlatDarkLaf.json"
