@@ -269,7 +269,12 @@ $jobScripts.dev = {
             }
             $before = @{}; & $p.Exe -m pip list --format=freeze 2>$null | ForEach-Object { $k, $v = $_ -split '==', 2; $before[$k] = $v }
             $o = & $p.Exe @pipArgs @($todo.name) 2>&1 | Out-String
-            if ($LASTEXITCODE -ne 0) { "  ✗ pip $($p.V): $(($o.Trim() -split "`r?`n")[-1])" }
+            $pipRc = $LASTEXITCODE
+            if ($pipRc -ne 0) {
+                # Konflikt (z.B. Paket will neuere torch): einzeln nachziehen, damit nicht alles blockiert
+                "  ! pip $($p.V): Sammel-Upgrade fehlgeschlagen ($(($o.Trim() -split "`r?`n")[-1])), versuche einzeln"
+                foreach ($q in $todo) { & $p.Exe @pipArgs $q.name *> $null }
+            }
             $after = @{}; & $p.Exe -m pip list --format=freeze 2>$null | ForEach-Object { $k, $v = $_ -split '==', 2; $after[$k] = $v }
             $changed = @($todo | Where-Object { $after[$_.name] -and $after[$_.name] -ne $before[$_.name] })
             foreach ($q in $changed) { "    ↑ pip $($p.V): $($q.name)  $($before[$q.name]) → $($after[$q.name])" }
@@ -286,14 +291,17 @@ $jobScripts.dev = {
         $o = cargo install-update -l 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             "  ✗ cargo: $(($o.Trim() -split "`r?`n")[-1])"
-            if ($o -match '4551|Application Control') { "    → Smart App Control blockiert ein lokal gebautes Programm; neu installieren mit: cargo binstall -y --force <crate>" }
+            if ($o -match '4551|Application Control') { "    → Smart App Control blockiert cargo-update; neu installieren mit: cargo binstall -y --force cargo-update" }
         } else {
             $need = @(($o -split "`r?`n") | Where-Object { $_ -match '^(\S+)\s+v\S+\s+v\S+\s+Yes' } | ForEach-Object { ($_ -split '\s+')[0] })
             if (-not $need.Count) { "  ✓ cargo-Programme aktuell" }
             elseif (Get-Command cargo-binstall -EA SilentlyContinue) {
-                $o = cargo binstall -y @need 2>&1 | Out-String
-                if ($LASTEXITCODE -ne 0) { "  ✗ cargo binstall: $(($o.Trim() -split "`r?`n")[-1])" }
-                else { $need | ForEach-Object { "    ↑ cargo: $_" } }
+                # kein Kompilieren als Fallback: lokal gebaute .exe würde Smart App Control blockieren
+                foreach ($c in $need) {
+                    $o = cargo binstall -y --disable-strategies compile $c 2>&1 | Out-String
+                    if ($LASTEXITCODE -ne 0) { "  ✗ cargo binstall $($c): kein fertiges Release ($(($o.Trim() -split "`r?`n")[-1]))" }
+                    else { "    ↑ cargo: $c" }
+                }
             } else { "  ! cargo: Updates verfügbar ($($need -join ', ')), aber cargo-binstall fehlt" }
         }
     }
