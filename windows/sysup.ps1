@@ -281,20 +281,36 @@ $jobScripts.dev = {
             $held = @($todo | Where-Object { $after[$_.name] -eq $before[$_.name] })
             if ($held.Count) { "  ⊘ pip $($p.V): zurückgehalten (Abhängigkeiten): $($held.name -join ', ')" }
             $chk = & $p.Exe -m pip check 2>&1
-            if ($LASTEXITCODE -ne 0) { $chk | ForEach-Object { "  ! pip $($p.V): $_" } }
+            if ($LASTEXITCODE -ne 0) {
+                # Upgrade hat eine Abhängigkeit gebrochen ("..., but you have X 1.2"): X auf alte Version zurück
+                $broken = @($chk | ForEach-Object { if ("$_" -match 'but you have (\S+) ') { $Matches[1] } } | Sort-Object -Unique)
+                foreach ($b in $broken) {
+                    $k = @($before.Keys | Where-Object { $_ -ieq $b -or ($_ -replace '[-_.]', '-') -ieq ($b -replace '[-_.]', '-') })[0]
+                    if ($k -and $before[$k] -ne $after[$k]) {
+                        & $p.Exe -m pip install --disable-pip-version-check -q "$k==$($before[$k])" *> $null
+                        "  ↩ pip $($p.V): $k zurück auf $($before[$k]) (Konflikt)"
+                    }
+                }
+                $chk = & $p.Exe -m pip check 2>&1
+                if ($LASTEXITCODE -ne 0) { $chk | ForEach-Object { "  ! pip $($p.V): $_" } }
+            }
         }
     }
     if (Get-Command cargo-install-update -EA SilentlyContinue) {
         # Nur prüfen (-l), installiert wird per cargo-binstall: fertige Release-Programme.
         # Lokal kompilierte .exe blockiert Smart App Control (os error 4551).
         "… cargo install-update -l"
-        $o = cargo install-update -l 2>&1 | Out-String
+        # -g: auch git-Crates prüfen; die gibt es nicht als Release, also nur melden
+        $o = cargo install-update -l -g 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             "  ✗ cargo: $(($o.Trim() -split "`r?`n")[-1])"
             if ($o -match '4551|Application Control') { "    → Smart App Control blockiert cargo-update; neu installieren mit: cargo binstall -y --force cargo-update" }
         } else {
-            $need = @(($o -split "`r?`n") | Where-Object { $_ -match '^(\S+)\s+v\S+\s+v\S+\s+Yes' } | ForEach-Object { ($_ -split '\s+')[0] })
-            if (-not $need.Count) { "  ✓ cargo-Programme aktuell" }
+            $rows = @(($o -split "`r?`n") | Where-Object { $_ -match '\sYes\s*$' })
+            $need = @($rows | Where-Object { $_ -match '^(\S+)\s+v\S+\s+v\S+\s+Yes' } | ForEach-Object { ($_ -split '\s+')[0] })
+            $gitNeed = @($rows | Where-Object { $_ -notmatch '^(\S+)\s+v\S+\s+v\S+\s+Yes' } | ForEach-Object { ($_.Trim() -split '\s+')[0] })
+            foreach ($g in $gitNeed) { "  ! cargo: $g (git) hat ein Update; kein Release vorhanden, lokal bauen würde Smart App Control blockieren" }
+            if (-not $need.Count) { if (-not $gitNeed.Count) { "  ✓ cargo-Programme aktuell" } }
             elseif (Get-Command cargo-binstall -EA SilentlyContinue) {
                 # kein Kompilieren als Fallback: lokal gebaute .exe würde Smart App Control blockieren
                 foreach ($c in $need) {
