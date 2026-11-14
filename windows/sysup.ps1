@@ -271,7 +271,7 @@ $jobScripts.dev = {
             $todo = @($old | Where-Object { $n = & $norm $_.name; $local -notcontains $n -and -not $holds.ContainsKey($n) })
             if (-not $todo.Count) { if (-not $old.Count) { "  ✓ pip $($p.V): aktuell" }; continue }
             $cons = Join-Path $env:TEMP "sysup-pip-constraints-$($p.V).txt"
-            @($localPins) + @($holds.Keys | ForEach-Object { "$_==$($holds[$_][0])" }) | Set-Content -Encoding ascii $cons
+            Set-Content -Encoding ascii -Path $cons -Value (@($localPins) + @($holds.Keys | ForEach-Object { "$_==$($holds[$_][0])" }))
             $pipArgs = @('-m', 'pip', 'install', '-U', '--disable-pip-version-check', '-q', '-c', $cons)
             $o = & $p.Exe @pipArgs @($todo.name) 2>&1 | Out-String
             if ($LASTEXITCODE -ne 0) {
@@ -307,14 +307,14 @@ $jobScripts.dev = {
             }
             $after = & $freeze $p.Exe
             foreach ($t in $rolled.Keys) { if ($rolled[$t]) { $holds[$t] = @($rolled[$t], (Get-Date -Format 'yyyy-MM-dd')) } }
-            $holds.Keys | Sort-Object | ForEach-Object { "$_==$($holds[$_][0]) $($holds[$_][1])" } | Set-Content -Encoding ascii $holdFile
+            Set-Content -Encoding ascii -Path $holdFile -Value @($holds.Keys | Sort-Object | ForEach-Object { "$_==$($holds[$_][0]) $($holds[$_][1])" })
             foreach ($q in $todo) {
                 $n = & $norm $q.name
-                if ($rolled.ContainsKey($n)) { "  ↩ pip $($p.V): $($q.name) bleibt auf $($before[$n]) (Konflikt, 14 Tage gesperrt)" }
+                if ($rolled[$n]) { "  ↩ pip $($p.V): $($q.name) bleibt auf $($before[$n]) (Konflikt, 14 Tage gesperrt)" }
                 elseif ($after[$n] -and $after[$n] -ne $before[$n]) { "    ↑ pip $($p.V): $($q.name)  $($before[$n]) → $($after[$n])" }
                 else { "  ⊘ pip $($p.V): $($q.name) nicht aktualisiert (Abhängigkeiten oder Fehler)" }
             }
-            foreach ($t in $rolled.Keys) { if (-not ($todo | Where-Object { (& $norm $_.name) -eq $t })) { "  ↩ pip $($p.V): $t zurück auf $($before[$t]) (Konflikt, 14 Tage gesperrt)" } }
+            foreach ($t in @($rolled.Keys | Where-Object { $rolled[$_] })) { if (-not ($todo | Where-Object { (& $norm $_.name) -eq $t })) { "  ↩ pip $($p.V): $t zurück auf $($before[$t]) (Konflikt, 14 Tage gesperrt)" } }
             $chk = @(& $p.Exe -m pip check --disable-pip-version-check 2>&1)
             if ($LASTEXITCODE -ne 0) { $chk | ForEach-Object { "  ! pip $($p.V): $_" } }
         }
