@@ -375,7 +375,11 @@ sysup() {
   local -a stale
   for n in dnf flatpak claude summary; do stale+=( $logdir/$n-*(Nom[11,-1]) ); done
   (( $#stale )) && rm -f $stale
-  printf "\n\033[1;32m✓ Done in %ds\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$((SECONDS - start))" "$summary"
+  local -i d=$((SECONDS - start)); local dur=""
+  (( d >= 3600 )) && dur="$((d / 3600))h "
+  (( d >= 60 )) && dur+="$((d % 3600 / 60))m "
+  dur+="$((d % 60))s"
+  printf "\n\033[1;32m✓ Done in %s\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$dur" "$summary"
 }
 
 # garantierter Cleanup des temp. Swap-Puffers ($1 = pfad); idempotent
@@ -1082,7 +1086,11 @@ if devs:
                      $logdir/summary-*.txt(Nom[11,-1]) $logdir/shutdown-*.log(Nom[11,-1])
                      $logdir/(dotfiles|proton-ge|ai|steam|firmware|rice|tools)-*.log(Nmh+24) )
     (( $#stale )) && rm -f $stale
-    printf "\n\033[1;32m✓ Done in %ds\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$((SECONDS - start))" "$summary"
+    local -i d=$((SECONDS - start)); local dur=""
+    (( d >= 3600 )) && dur="$((d / 3600))h "
+    (( d >= 60 )) && dur+="$((d % 3600 / 60))m "
+    dur+="$((d % 60))s"
+    printf "\n\033[1;32m✓ Done in %s\033[0m  \033[2m(Zusammenfassung: %s)\033[0m\n" "$dur" "$summary"
   } always {
     _sysup_lock_update $lock $pids
     tput cnorm 2>/dev/null
