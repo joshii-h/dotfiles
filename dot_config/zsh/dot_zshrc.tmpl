@@ -1008,9 +1008,16 @@ if devs:
     pids+=($!)
     # "tools": Kommandozeilen-Werkzeuge ausserhalb von Portage, per go install
     # gebaut (vt = VirusTotal-CLI). Wartet auf dotfiles, damit ein frisch
-    # synchronisiertes vt-update schon gilt.
+    # synchronisiertes vt-update schon gilt. cad-update (build123d-Umgebung
+    # in ~/Projects/cad, uv) wartet zusaetzlich auf die emerge-Kette: tauscht
+    # die gerade Python aus, scheiterte der Rauchtest und das Upgrade wuerde
+    # grundlos zurueckgerollt.
     setsid zsh -fc 'while kill -0 $1 2>/dev/null; do sleep 2; done
-      exec $HOME/.local/bin/vt-update' _ $dotfiles_pid &>"${logs[9]}" &!
+      $HOME/.local/bin/vt-update; r1=$?
+      print "wartet auf emerge ..."
+      while kill -0 $2 2>/dev/null; do sleep 2; done
+      $HOME/.local/bin/cad-update; r2=$?
+      exit $(( r1 || r2 ))' _ $dotfiles_pid $emerge_pid &>"${logs[9]}" &!
     pids+=($!)
     _sysup_lock_update $lock $$ $pids
     trap "_sysup_lock_update ${(q)lock} $pids" EXIT

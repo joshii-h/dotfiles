@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#
+# cad-update — hält die CAD-Umgebung (build123d + OCP-Kernel + ocp-vscode) aktuell.
+#
+# Die Umgebung ist ein uv-Projekt (~/Projects/cad, uv.lock im Projekt). Das
+# Skript hebt alle Abhängigkeiten auf den neuesten Stand, den pyproject.toml
+# erlaubt, und lässt danach tests/smoke.py laufen. Scheitert der Test, wird das
+# alte uv.lock wiederhergestellt: build123d ist vor 1.0 und ändert seine API,
+# ein OCP-Sprung kann Geometrie verändern. Gibt es das Projekt nicht, tut das
+# Skript nichts.
+#
+#   cad-update           # upgraden, testen, bei Fehler zurückrollen
+#   cad-update --check   # nur zeigen, was sich ändern würde
+#
+set -euo pipefail
+
+PROJ="${CAD_PROJECT:-$HOME/Projects/cad}"
+MAIN='build123d|cadquery-ocp|cadquery-ocp-novtk|ocp-vscode'
+
+CHECK=0
+for arg in "$@"; do
+  case "$arg" in
+    --check)   CHECK=1 ;;
+    -h|--help) sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf '\033[1;31mEE\033[0m Unbekannte Option: %s\n' "$arg" >&2; exit 2 ;;
+  esac
+done
+
+info() { printf '\033[1;34m::\033[0m %s\n' "$*"; }
+err()  { printf '\033[1;31mEE\033[0m %s\n' "$*" >&2; }
+
+[ -f "$PROJ/pyproject.toml" ] || { info "kein CAD-Projekt ($PROJ) – übersprungen."; exit 0; }
+command -v uv >/dev/null || { err "uv fehlt – CAD-Umgebung kann nicht aktualisiert werden."; exit 1; }
+cd "$PROJ"
+
+# "name version" je Paket aus einem uv.lock
+versions() {
+  awk '$1 == "[[package]]" { p = 1; next }
+       p && $1 == "name"    { gsub(/"/, "", $3); n = $3 }
+       p && $1 == "version" { gsub(/"/, "", $3); print n, $3; p = 0 }' "$1" | sort
+}
+
+OLD=$(mktemp) NEW=$(mktemp)
+trap 'rm -f "$OLD" "$NEW"' EXIT
+if [ -f uv.lock ]; then cp uv.lock "$OLD"; fi
+# Alten Stand zurückholen; ohne vorheriges uv.lock wäre eine leere Datei ungültig.
+restore() { if [ -s "$OLD" ]; then cp "$OLD" uv.lock; else rm -f uv.lock; fi; }
+
+info "Ermittle neueste Versionen ..."
+if [ "$CHECK" -eq 1 ]; then
+  # Auflösung in eine Kopie, das echte uv.lock bleibt unberührt.
+  TMP=$(mktemp -d); trap 'rm -rf "$OLD" "$NEW" "$TMP"' EXIT
+  cp pyproject.toml "$TMP/"; [ -s "$OLD" ] && cp "$OLD" "$TMP/uv.lock"
+  timeout 300 uv lock --upgrade --project "$TMP" --quiet \
+    || { err "Auflösung fehlgeschlagen."; exit 1; }
+  cp "$TMP/uv.lock" "$NEW"
+else
+  timeout 300 uv lock --upgrade --quiet \
+    || { err "Auflösung fehlgeschlagen."; restore; exit 1; }
+  cp uv.lock "$NEW"
+fi
+
+# Änderungen: Hauptpakete einzeln, der Rest als Zahl.
+CHANGES=$(join -a1 -a2 -e - -o 0,1.2,2.2 <(versions "$OLD") <(versions "$NEW") | awk '$2 != $3')
+if [ -z "$CHANGES" ]; then
+  info "CAD-Umgebung ist aktuell (build123d $(versions "$NEW" | awk '$1 == "build123d" {print $2}'))."
+else
+  awk -v main="^($MAIN)\$" '
+    $1 ~ main { printf "   \033[32m↑\033[0m %s %s → %s\n", $1, $2, $3; next }
+    { n++ }
+    END { if (n) printf "   \033[2m+ %d weitere Abhängigkeiten\033[0m\n", n }' <<<"$CHANGES"
+fi
+[ "$CHECK" -eq 1 ] && exit 0
+
+# sync läuft auch ohne Änderung: nach einem Python-Wechsel durch Portage baut
+# uv die venv hier neu auf.
+sync() { timeout 900 uv sync --frozen --quiet; }
+smoke() { [ ! -f tests/smoke.py ] || timeout 300 uv run --frozen tests/smoke.py 2>&1 | tail -3 | sed 's/^/   /'; }
+
+if sync && smoke; then
+  [ -z "$CHANGES" ] || info "Aktualisiert, Rauchtest bestanden."
+  exit 0
+fi
+if [ -z "$CHANGES" ]; then
+  err "CAD-Umgebung defekt (sync oder Rauchtest gescheitert) – kein Update beteiligt, bitte von Hand prüfen: cd $PROJ && uv run tests/smoke.py"
+  exit 1
+fi
+err "Rauchtest nach dem Upgrade gescheitert – stelle den alten Stand wieder her."
+restore
+if [ -f uv.lock ] && sync && smoke; then
+  err "Alter Stand läuft wieder. Upgrade von Hand prüfen: cd $PROJ && uv lock --upgrade && uv run tests/smoke.py"
+else
+  err "Auch der alte Stand läuft nicht mehr – bitte von Hand prüfen."
+fi
+exit 1
