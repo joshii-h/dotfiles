@@ -101,6 +101,9 @@ environment {
     // Terminal für Programme mit Terminal=true (btop, nvim …) im DMS-Starter
     TERMINAL "kitty"
     ELECTRON_OZONE_PLATFORM_HINT "auto"
+    // SpaceMouse-Empfänger (256f:c652) ist kein Gamepad: ohne das belegt er in
+    // SDL Platz 0 und verschiebt echte Controller in Emulatoren und Spielen.
+    SDL_GAMECONTROLLER_IGNORE_DEVICES "0x256f/0xc652"
 }
 
 // Autostart: DMS ist die komplette Oberfläche (Leiste, Benachrichtigungen,
