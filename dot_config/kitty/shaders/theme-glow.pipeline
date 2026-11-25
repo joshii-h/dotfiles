@@ -1,0 +1,9 @@
+# Hintergrundglühen in der Akzentfarbe des Themes (siehe theme-glow.slang).
+# Läuft nur, solange das kitty-Fenster den Fokus hat; 10 Bilder/s reichen für
+# die langsame Bewegung und halten die GPU-Last minimal.
+startgroup
+    animation_start os-window-focus-in | user-activity
+    animation_stop os-window-focus-out
+    animation_step 100
+    shaders theme-glow
+endgroup
