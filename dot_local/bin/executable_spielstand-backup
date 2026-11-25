@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# spielstand-backup – sichert Spielstände der Emulatoren und einzelner Spiele
+# als Schnappschüsse auf eine andere Platte.
+#
+# Läuft stündlich per cron, legt aber nur dann einen Schnappschuss an, wenn
+# sich an den Spielständen etwas geändert hat (die Zielplatte wird sonst nicht
+# angefasst). Unveränderte Dateien sind Hardlinks auf den Vorgänger, ein
+# Schnappschuss kostet also nur den Platz der geänderten Dateien.
+#
+#   spielstand-backup          sichern, falls etwas geändert wurde
+#   spielstand-backup --jetzt  Schnappschuss erzwingen
+#   spielstand-backup --liste  vorhandene Schnappschüsse zeigen
+#
+# Zurückholen: Ordner aus $ZIEL/<Zeitstempel>/<Name>/ an den Ursprungsort
+# kopieren (Emulator vorher schliessen).
+set -euo pipefail
+
+ZIEL_PLATTE=/mnt/seagate2tb
+ZIEL=$ZIEL_PLATTE/Spielstaende
+BEHALTEN=60
+STATUS=${XDG_STATE_HOME:-$HOME/.local/state}/spielstand-backup
+STEAM=${XDG_DATA_HOME:-$HOME/.local/share}/Steam/steamapps/compatdata
+
+# Name | Quellordner | Muster (leer = alles, sonst nur diese Dateien der obersten Ebene)
+QUELLEN=(
+    "dolphin/GC|$HOME/.local/share/dolphin-emu/GC|"
+    "dolphin/Wii|$HOME/.local/share/dolphin-emu/Wii|"
+    "dolphin/StateSaves|$HOME/.local/share/dolphin-emu/StateSaves|"
+    "dolphin/GBA|$HOME/.local/share/dolphin-emu/GBA|"
+    "pcsx2/memcards|$HOME/.config/PCSX2/memcards|"
+    "pcsx2/sstates|$HOME/.config/PCSX2/sstates|"
+    "ppsspp/SAVEDATA|$HOME/.config/ppsspp/PSP/SAVEDATA|"
+    "ppsspp/PPSSPP_STATE|$HOME/.config/ppsspp/PSP/PPSSPP_STATE|"
+    "rpcs3/home|$HOME/.config/rpcs3/dev_hdd0/home|"
+    "shadps4/home|$HOME/.local/share/shadPS4/home|"
+    "mgba|/mnt/samsung1/Emulation/gba|*.sav *.ss[0-9]"
+    "pokemon-feuergruen/spielordner|/mnt/samsung2/Pokémon Feuergrün (v3)|*.rxdata"
+    "pokemon-feuergruen/saved-games|$STEAM/3521987707/pfx/drive_c/users/steamuser/Saved Games|"
+)
+
+liste() {
+    find "$ZIEL" -mindepth 1 -maxdepth 1 -type d -name '20*' 2>/dev/null | sort
+}
+
+# Zeilen "Pfad Grösse Änderungszeit" aller zu sichernden Dateien
+bestand() {
+    local eintrag name quelle muster m
+    for eintrag in "${QUELLEN[@]}"; do
+        IFS='|' read -r name quelle muster <<<"$eintrag"
+        [[ -d $quelle ]] || continue
+        if [[ -z $muster ]]; then
+            find "$quelle" -type f -printf '%p %s %T@\n'
+        else
+            for m in $muster; do
+                find "$quelle" -maxdepth 1 -type f -name "$m" -printf '%p %s %T@\n'
+            done
+        fi
+    done | sort
+}
+
+case ${1:-} in
+    --liste)
+        liste
+        exit 0
+        ;;
+    --jetzt | "") ;;
+    *)
+        echo "Aufruf: spielstand-backup [--jetzt|--liste]" >&2
+        exit 2
+        ;;
+esac
+
+mkdir -p "$STATUS"
+neu=$(bestand | sha256sum | cut -d' ' -f1)
+alt=$(cat "$STATUS/pruefsumme" 2>/dev/null || true)
+if [[ ${1:-} != --jetzt && $neu == "$alt" ]]; then
+    exit 0
+fi
+
+if ! mountpoint -q "$ZIEL_PLATTE"; then
+    echo "spielstand-backup: $ZIEL_PLATTE ist nicht eingehängt, nichts gesichert." >&2
+    exit 1
+fi
+
+mkdir -p "$ZIEL"
+vorgaenger=$(liste | tail -n 1)
+stempel=$(date +%Y-%m-%d_%H%M%S)
+arbeit=$ZIEL/.unfertig-$stempel
+trap 'rm -rf "$arbeit"' EXIT
+mkdir "$arbeit"
+
+for eintrag in "${QUELLEN[@]}"; do
+    IFS='|' read -r name quelle muster <<<"$eintrag"
+    [[ -d $quelle ]] || continue
+    filter=()
+    if [[ -n $muster ]]; then
+        for m in $muster; do filter+=(--include="/$m"); done
+        filter+=(--exclude='*')
+    fi
+    verweis=()
+    [[ -n $vorgaenger && -d $vorgaenger/$name ]] && verweis=(--link-dest="$vorgaenger/$name")
+    mkdir -p "$arbeit/$name"
+    rsync -a --no-owner --no-group "${filter[@]}" "${verweis[@]}" "$quelle/" "$arbeit/$name/"
+done
+
+mv "$arbeit" "$ZIEL/$stempel"
+trap - EXIT
+echo "$neu" >"$STATUS/pruefsumme"
+
+# Alte Schnappschüsse ausdünnen
+liste | head -n -"$BEHALTEN" | while read -r weg; do
+    rm -rf "$weg"
+done
+
+echo "Spielstände gesichert: $ZIEL/$stempel"
