@@ -2,11 +2,16 @@
 # Bildwiederholrate nach Bedarf: Desktop alle Monitore 60 Hz (VRAM der RX 7900
 # taktet runter, ~22 W statt ~74 W), sobald ein Spiel läuft volle Hz.
 # Spiel erkannt an: Steam-Prozess "SteamLaunch AppId=", Programmen aus ~/Games,
-# aktivem GameMode oder dem manuellen Schalter (refresh-switch-toggle).
+# laufendem Emulator (PCSX2, Dolphin, RPCS3, PPSSPP - schon mit offener
+# Spieleliste), laufendem Wine/Proton (wineserver: Lutris, umu, Heroic ...),
+# einem Vollbildfenster unter niri (ausser Browser, Player, Fernwartung - siehe
+# KEIN_SPIEL), aktivem GameMode oder dem manuellen Schalter (refresh-switch-toggle).
 # Läuft unter KDE Plasma (kscreen-doctor) und niri (niri msg).
 HIGH="DP-1=165 HDMI-A-2=90"
 LOW="DP-1=60 HDMI-A-2=60"
 FORCE="$HOME/.cache/refresh-switch.force-high"
+# App-IDs (regulaerer Ausdruck, ohne Gross/Klein), deren Vollbild kein Spiel ist
+KEIN_SPIEL='firefox|chrom|mpv|vlc|totem|celluloid|kitty|code|teams|discord|vesktop|rustdesk|anydesk|omnissa|horizon|vmware|virtualbox|evince|okular|libreoffice|soffice|nautilus|thunar|obs|kdenlive|gimp|steam$|steamwebhelper'
 LOG="$HOME/.local/state/refresh-switch.log"
 
 exec 9>"${XDG_RUNTIME_DIR:-/tmp}/refresh-switch.lock"
@@ -62,10 +67,36 @@ for name, o in json.load(sys.stdin).items():
 	echo "$(date '+%F %T') $2 ${modes:+$(echo $modes)}${modes:-(schon gesetzt)}" >>"$LOG"
 }
 
+# niri kennt kein Vollbild-Flag: ein Fenster gilt als Vollbild, wenn es exakt so
+# gross ist wie der Monitor seines Workspaces (Kacheln sind wegen Leiste und
+# Abstaenden immer kleiner).
+vollbild_spiel() {
+	[ -n "${NIRI_SOCKET:-}" ] || return 1
+	{ niri msg --json outputs; echo; niri msg --json workspaces; echo; niri msg --json windows; } 2>/dev/null |
+		python3 -I -c "
+import json, re, sys
+try:
+    outs, wss, wins = (json.loads(l) for l in sys.stdin.read().splitlines() if l.strip())
+except Exception:
+    sys.exit(1)
+size = {n: (o['logical']['width'], o['logical']['height']) for n, o in outs.items() if o.get('logical')}
+ws_out = {w['id']: w.get('output') for w in wss}
+skip = re.compile(sys.argv[1], re.I)
+for w in wins:
+    if skip.search(w.get('app_id') or ''):
+        continue
+    if tuple(w['layout']['window_size']) == size.get(ws_out.get(w.get('workspace_id'))):
+        sys.exit(0)
+sys.exit(1)" "$KEIN_SPIEL"
+}
+
 gaming() {
 	[ -e "$FORCE" ] && return 0
 	pgrep -f 'SteamLaunch AppId=' >/dev/null && return 0
 	pgrep -f "^$HOME/Games/" >/dev/null && return 0
+	pgrep -x 'pcsx2-qt|dolphin-emu|rpcs3|PPSSPPSDL|PPSSPPQt|shadps4' >/dev/null && return 0
+	pgrep -x wineserver >/dev/null && return 0
+	vollbild_spiel && return 0
 	gamemoded -s 2>/dev/null | grep -q 'is active'
 }
 
