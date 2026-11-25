@@ -120,10 +120,12 @@ PATCHES = [
         "from agent.transports.types import NormalizedResponse, ToolCall, Usage, build_tool_call\n",
     ),
     (
+        # Anker 2 seit 2026-11-25 nur noch auf den Funktionsnamen: Upstream hat
+        # die Signatur um base_url erweitert, der volle Kopf als Anker brach.
         "2: helper + regexes",
-        "def _reasoning_config_for_model(model: str, reasoning_config: dict | None) -> dict | None:\n",
+        "def _reasoning_config_for_model(",
         _HELPER_BLOCK
-        + "def _reasoning_config_for_model(model: str, reasoning_config: dict | None) -> dict | None:\n",
+        + "def _reasoning_config_for_model(",
     ),
     (
         # Anker 3 neu verankert fuer Hermes 0.21.1 (2026-09-11): normalize_response
