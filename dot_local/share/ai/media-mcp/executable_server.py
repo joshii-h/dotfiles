@@ -26,7 +26,7 @@ import os, sys, time, uuid, threading, subprocess, datetime, pathlib, json, base
 import urllib.request, urllib.error, urllib.parse
 
 HOME = pathlib.Path.home()
-AI = HOME / "ai"
+AI = HOME / ".local" / "share" / "ai"
 INCOMING = AI / "incoming"          # hier abgelegte Dateien per Kurzname erreichbar
 UPLOADS = AI / "odysseus" / "data" / "uploads"   # Odysseus-Chat-Uploads (verschachtelt nach Datum)
 OUTPUTS = AI / "media-mcp" / "outputs"
@@ -2119,11 +2119,38 @@ def _image_result(out: pathlib.Path, prompt: str, size: str = "",
     if note:
         lines.append(note)
     lines.append(f"(Datei: {out})")
-    b64 = base64.b64encode(out.read_bytes()).decode()
+    data, mime = _inline_preview(out)
     return [
         TextContent(type="text", text="\n".join(lines)),
-        ImageContent(type="image", data=b64, mime_type="image/png"),
+        ImageContent(type="image", data=base64.b64encode(data).decode(), mime_type=mime),
     ]
+
+
+# Der MCP-Client (mcp >= 2.3, httpx2) bricht SSE-Events ueber 1 MiB mit
+# "Server-sent event exceeded the 1048576 byte limit" ab -> Verbindung zu, Tool
+# "kaputt". Ein SDXL-PNG hat ~2 MB (base64 ~2,8 MB). Inline geht deshalb nur eine
+# JPEG-Vorschau unter dem Limit; das Original bleibt als PNG unter OUTPUTS.
+_INLINE_MAX_BYTES = 600_000   # roh; base64 +33 % + JSON-Huelle bleibt klar < 1 MiB
+
+
+def _inline_preview(out: pathlib.Path) -> tuple[bytes, str]:
+    raw = out.read_bytes()
+    if len(raw) <= _INLINE_MAX_BYTES:
+        return raw, "image/png"
+    import io
+    from PIL import Image
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    buf = io.BytesIO()
+    for quality in (90, 82, 72):
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=quality, optimize=True)
+        if buf.tell() <= _INLINE_MAX_BYTES:
+            return buf.getvalue(), "image/jpeg"
+    while buf.tell() > _INLINE_MAX_BYTES:
+        img = img.resize((max(1, img.width * 3 // 4), max(1, img.height * 3 // 4)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=72, optimize=True)
+    return buf.getvalue(), "image/jpeg"
 
 
 @mcp.tool()
