@@ -495,7 +495,21 @@ _sysup_emerge_summary() {
       fi
     done < ${XDG_CONFIG_HOME:-$HOME/.config}/sysup/leichen-gewollt
   fi
-  awk -v logpath="$log" -v gewollt="$gewollt" '
+  # Namentlich maskierte/freigegebene Pakete. Eine Wildcard-Maske wie
+  # "*/*::tatsh-overlay" trifft fuer eix jedes Paket des Trees: es meldete
+  # damit ueber 22000 "ueberfluessige" Masken. Aus package.mask/unmask zaehlen
+  # deshalb nur Funde zu Paketen, die dort mit Namen stehen.
+  local maskexpl="" f match mbegin mend
+  for f in /etc/portage/package.{mask,unmask}{,/*}(N.); do
+    while read -r atom grund; do
+      [[ -z $atom || $atom == \#* ]] && continue
+      [[ $atom == [\<\>=~]* ]] && d=1 || d=0
+      atom=${atom//[<>=~!]/}; atom=${atom%%::*}; atom=${atom%%:*}; atom=${atom%%\[*}
+      (( d )) && [[ $atom =~ '^(.*)-[0-9][^-]*(-r[0-9]+)?\*?$' ]] && atom=$match[1]
+      [[ $atom == *\** ]] || maskexpl+="$atom"$'\n'
+    done < $f
+  done
+  awk -v logpath="$log" -v gewollt="$gewollt" -v maskexpl="$maskexpl" '
     # Harten Abbruch (maskierte Abhaengigkeit ohne "skipped"-Block) melden.
     function blockflush(   k) {
       k = (pend_top != "" ? pend_top : "?") " braucht " pend_dep
@@ -512,7 +526,9 @@ _sysup_emerge_summary() {
       }
     }
     # Bei \r-Fortschrittszeilen zaehlt nur, was ein Terminal zuletzt zeigen wuerde.
-    function obs_add(atom,   f, prio) {
+    function obs_add(atom,   f, prio, n, t, i) {
+      if (!mx_init) { n = split(maskexpl, t, "\n"); for (i = 1; i <= n; i++) mx[t[i]] = 1; mx_init = 1 }
+      if (ofile ~ /package\.(un)?mask/ && !(atom in mx)) return
       f = ofile; sub(/:$/, "", f); sub(/.*\/package\./, "", f); sub(/\{,accept_\}/, "accept_", f)
       prio = (ocat == "nicht installiert") ? 3 : (ocat == "ungültig") ? 2 : 1
       if (!(atom in oprio)) oorder[++no_obs] = atom
@@ -618,6 +634,8 @@ _sysup_emerge_summary() {
       next
     }
     /^!!! One of the following masked packages is required/ { next }
+    # Erledigt die Stufe preserved-rebuild gleich nach @world - kein Fehler.
+    /^!!! existing preserved libs/ { next }
     /!!!|^>>> Failed to emerge|^ \* ERROR: .* failed|returned code = [1-9]/ {
       line = $0
       if (match(line, /!!!/)) line = substr(line, RSTART)
@@ -692,7 +710,8 @@ _sysup_emerge_summary() {
         printf "  \033[1;31m✗ emerge-Kette nicht regulär beendet (kein Exit-Code im Log - abgeschossen?)\033[0m\n"
       if (rc != 0) {
         # Die Kette bricht beim ersten Fehler ab (&&) - alles danach lief nicht.
-        if      (stage == "world")         skipped = "depclean, eclean-kernel, eclean-dist"
+        if      (stage == "world")         skipped = "preserved-rebuild, depclean, eclean-kernel, eclean-dist"
+        else if (stage == "preserved-rebuild") skipped = "depclean, eclean-kernel, eclean-dist"
         else if (stage == "depclean")      skipped = "eclean-kernel, eclean-dist"
         else if (stage == "eclean-kernel") skipped = "eclean-dist"
         else                          skipped = ""
@@ -901,6 +920,9 @@ sysup() {
     # an welcher Stufe die Kette abbrach. --with-bdeps/--changed-deps stehen
     # auch in EMERGE_DEFAULT_OPTS, bleiben hier aber explizit, damit sysup nicht
     # still von make.conf abhaengt.
+    # @preserved-rebuild baut Pakete neu, die nach einem Bibliotheks-Update
+    # noch an der alten, von Portage aufbewahrten .so haengen (ohne Funde ein
+    # No-op). Ohne die Stufe blieb so eine Altlast wochenlang liegen.
     # eclean-kernel laeuft am Ende der emerge-Kette, weil emerge zuvor evtl. einen
     # neuen Kernel installiert hat. -n 2 = der neueste plus ein Reserve-Kernel;
     # der laufende Kernel wird zusaetzlich immer geschuetzt (z.B. wenn nach einem
@@ -916,6 +938,7 @@ sysup() {
       (( $+commands[sysup-sushi-nautilus] )) && sysup-sushi-nautilus pin
       true \
         && echo __SYSUP_STAGE=world         && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world \
+        && echo __SYSUP_STAGE=preserved-rebuild && command sudo emerge @preserved-rebuild \
         && echo __SYSUP_STAGE=depclean      && command sudo emerge --depclean \
         && echo __SYSUP_STAGE=eclean-kernel && command sudo eclean-kernel -n 2 \
         && echo __SYSUP_STAGE=eclean-dist   && command sudo eclean-dist -d -f
