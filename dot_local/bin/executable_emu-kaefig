@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# emu-kaefig — fremde Emulator-Binaries (AppImage-Inhalt) abgeschottet starten.
+#
+#   emu-kaefig NAME [--netz] [--rw PFAD]... [--ro PFAD]... -- BEFEHL [ARGUMENTE]
+#
+# Der Befehl sieht vom Home nur ~/.config/NAME, ~/.local/share/NAME,
+# ~/.cache/NAME (schreibbar) und ~/.local/opt/NAME (nur lesbar), dazu die mit
+# --rw/--ro genannten Pfade. Kein Netz (ausser --netz), kein Sitzungs-D-Bus,
+# kein SSH-Agent, kein Schlüsselbund. Durchgereicht werden Grafik (/dev/dri,
+# Wayland, X11 für XWayland), Ton (PipeWire/Pulse) und Eingabegeräte.
+#
+set -euo pipefail
+
+name=${1:?Aufruf: emu-kaefig NAME [--netz] [--rw PFAD] [--ro PFAD] -- BEFEHL}
+shift
+netz=() extra=()
+while (( $# )); do
+  case $1 in
+    --netz) netz=(--share-net); shift ;;
+    --rw)   extra+=(--bind "$2" "$2"); shift 2 ;;
+    --ro)   extra+=(--ro-bind "$2" "$2"); shift 2 ;;
+    --)     shift; break ;;
+    *)      echo "emu-kaefig: unbekannte Option $1" >&2; exit 2 ;;
+  esac
+done
+(( $# )) || { echo "emu-kaefig: Befehl fehlt" >&2; exit 2; }
+
+rt=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+cfg=$HOME/.config/$name data=$HOME/.local/share/$name cache=$HOME/.cache/$name opt=$HOME/.local/opt/$name
+mkdir -p "$cfg" "$data" "$cache"
+
+args=(
+  --unshare-all "${netz[@]}" --die-with-parent --new-session
+  --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/sbin /sbin
+  --symlink usr/lib /lib --symlink usr/lib64 /lib64
+  --ro-bind /etc /etc --ro-bind /sys /sys
+  --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run
+  --dev-bind /dev/dri /dev/dri --dev-bind /dev/input /dev/input
+  --ro-bind-try /run/udev /run/udev
+  --ro-bind-try /tmp/.X11-unix /tmp/.X11-unix
+  --tmpfs "$HOME" --dir "$rt"
+  --bind "$cfg" "$cfg" --bind "$data" "$data" --bind "$cache" "$cache"
+  --ro-bind-try "$opt" "$opt"
+  --ro-bind-try "$HOME/.local/share/fonts" "$HOME/.local/share/fonts"
+  --ro-bind-try "$HOME/.config/fontconfig" "$HOME/.config/fontconfig"
+  --ro-bind-try "$rt/${WAYLAND_DISPLAY:-wayland-0}" "$rt/${WAYLAND_DISPLAY:-wayland-0}"
+  --ro-bind-try "$rt/pipewire-0" "$rt/pipewire-0"
+  --ro-bind-try "$rt/pulse" "$rt/pulse"
+  --unsetenv DBUS_SESSION_BUS_ADDRESS --unsetenv SSH_AUTH_SOCK
+  --unsetenv GNOME_KEYRING_CONTROL --unsetenv NIRI_SOCKET
+  --setenv XDG_RUNTIME_DIR "$rt" --chdir "$HOME"
+)
+# Rohzugriff auf Gamepads (Gyro, Rumble über hidraw), soweit vorhanden
+for h in /dev/hidraw*; do [[ -e $h ]] && args+=(--dev-bind "$h" "$h"); done
+
+exec bwrap "${args[@]}" "${extra[@]}" -- "$@"

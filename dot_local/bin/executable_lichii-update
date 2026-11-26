@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# lichii-update — neuestes Lichii-AppImage von GitHub holen, Prüfsumme gegen
+# die Release-Angabe vergleichen und im Käfig nach ~/.local/opt/lichii entpacken.
+set -euo pipefail
+opt=$HOME/.local/opt/lichii asset=lichii-linux-x86_64-pgo.AppImage
+if pgrep -f "^$opt/squashfs-root/" >/dev/null; then
+  echo ":: Lichii läuft gerade - Update übersprungen."; exit 0
+fi
+echo ":: Ermittle neuesten Lichii-Build ..."
+read -r tag url sum < <(curl -fsS -A curl --max-time 30 https://api.github.com/repos/zortos293/Lichii/releases/latest |
+  python3 -I -c 'import sys,json
+d=json.load(sys.stdin)
+a=[x for x in d["assets"] if x["name"]==sys.argv[1]][0]
+print(d["tag_name"], a["browser_download_url"], (a.get("digest") or "").removeprefix("sha256:"))' "$asset")
+[[ -n $sum ]] || { echo "✗ Release nennt keine Prüfsumme - abgebrochen" >&2; exit 1; }
+if [[ -r $opt/version && $(<"$opt/version") == "$tag" ]]; then
+  echo ":: Lichii $tag ist aktuell."; exit 0
+fi
+neu=$opt/.neu; rm -rf "$neu"; mkdir -p "$neu"
+curl -fsSL -A curl --retry 3 --max-time 900 -o "$neu/$asset" "$url"
+echo "$sum  $neu/$asset" | sha256sum -c --quiet
+chmod +x "$neu/$asset"
+emu-kaefig lichii --rw "$opt" -- sh -c 'cd "$1" && "./$2" --appimage-extract >/dev/null' _ "$neu" "$asset"
+rm -rf "$opt/squashfs-root.alt"
+[[ -d $opt/squashfs-root ]] && mv "$opt/squashfs-root" "$opt/squashfs-root.alt"
+mv "$neu/squashfs-root" "$opt/squashfs-root"
+echo "$tag" > "$opt/version"
+rm -rf "$neu" "$opt/squashfs-root.alt"
+echo ":: Lichii auf $tag aktualisiert."

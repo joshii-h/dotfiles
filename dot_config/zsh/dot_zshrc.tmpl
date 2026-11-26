@@ -1035,17 +1035,19 @@ if devs:
       exit $(( r1 || r2 || r3 || r4 ))' &>"${logs[8]}" &!
     pids+=($!)
     # "tools": Kommandozeilen-Werkzeuge ausserhalb von Portage, per go install
-    # gebaut (vt = VirusTotal-CLI). Wartet auf dotfiles, damit ein frisch
-    # synchronisiertes vt-update schon gilt. cad-update (build123d-Umgebung
+    # gebaut (vt = VirusTotal-CLI), und lichii-update (Switch-2-Emulator als
+    # AppImage von GitHub, sha256-geprüft, laeuft nur im emu-kaefig). Wartet auf
+    # dotfiles, damit frisch synchronisierte Skripte schon gelten. cad-update (build123d-Umgebung
     # in ~/Projects/cad, uv) wartet zusaetzlich auf die emerge-Kette: tauscht
     # die gerade Python aus, scheiterte der Rauchtest und das Upgrade wuerde
     # grundlos zurueckgerollt.
     setsid zsh -fc 'while kill -0 $1 2>/dev/null; do sleep 2; done
       $HOME/.local/bin/vt-update; r1=$?
+      $HOME/.local/bin/lichii-update; r3=$?
       print "wartet auf emerge ..."
       while kill -0 $2 2>/dev/null; do sleep 2; done
       $HOME/.local/bin/cad-update; r2=$?
-      exit $(( r1 || r2 ))' _ $dotfiles_pid $emerge_pid &>"${logs[9]}" &!
+      exit $(( r1 || r2 || r3 ))' _ $dotfiles_pid $emerge_pid &>"${logs[9]}" &!
     pids+=($!)
     _sysup_lock_update $lock $$ $pids
     trap "_sysup_lock_update ${(q)lock} $pids" EXIT

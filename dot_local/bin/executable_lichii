@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# lichii — Switch-2-Emulator (fremdes AppImage, entpackt unter ~/.local/opt/lichii)
+# abgeschottet starten: kein Netz, vom Home nur die eigenen Lichii-Ordner,
+# Spiele nur lesbar. Aktualisieren: lichii-update
+exec emu-kaefig lichii \
+  --ro /mnt/samsung1/Emulation/switch2 --ro /mnt/samsung1/Emulation/switch \
+  -- "$HOME/.local/opt/lichii/squashfs-root/AppRun" "$@"

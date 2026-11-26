@@ -9,6 +9,10 @@ windows/**
 .local/bin/sysup-shutdown
 .local/bin/emerge-mon
 .local/bin/sysup-sushi-nautilus
+.local/bin/emu-kaefig
+.local/bin/lichii
+.local/bin/lichii-update
+.local/share/applications/lichii.desktop
 {{- end }}
 
 # AI-Stack (ROCm, Hermes) und Proton-GE laufen nur im Gentoo-sysup.

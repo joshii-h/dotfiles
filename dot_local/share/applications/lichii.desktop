@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Lichii
+GenericName=Switch-2-Emulator
+Comment=Nintendo Switch und Switch 2 (experimentell, abgeschottet)
+Exec=/home/joshii/.local/bin/lichii %f
+Icon=/home/joshii/.local/opt/lichii/squashfs-root/io.github.zortos293.lichii.png
+Categories=Game;Emulator;
+Terminal=false
