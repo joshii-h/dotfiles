@@ -910,12 +910,17 @@ sysup() {
     # brauchen also keinen Download); -f schuetzt fetch-restricted Dateien, die
     # von Hand heruntergeladen wurden. Ohne das wuchs distfiles auf 89 GB.
     setsid zsh -fc "$(functions _sysup_sync)"'
-      _sysup_sync \
+      _sysup_sync
+      # Sushi (Leertasten-Vorschau) vor dem Update an die Nautilus-Version
+      # binden und danach die Schnittstelle pruefen - siehe sysup-sushi-nautilus.
+      (( $+commands[sysup-sushi-nautilus] )) && sysup-sushi-nautilus pin
+      true \
         && echo __SYSUP_STAGE=world         && command sudo emerge -uDN --with-bdeps=y --changed-deps=y @world \
         && echo __SYSUP_STAGE=depclean      && command sudo emerge --depclean \
         && echo __SYSUP_STAGE=eclean-kernel && command sudo eclean-kernel -n 2 \
         && echo __SYSUP_STAGE=eclean-dist   && command sudo eclean-dist -d -f
       rc=$?
+      (( $+commands[sysup-sushi-nautilus] )) && sysup-sushi-nautilus check
       # Leichen in /etc/portage (Eintraege fuer nicht installierte, stabil
       # gewordene oder ungueltige Pakete) nur melden, nie anfassen; aendert
       # den Exit-Code der Kette nicht. LC_ALL=C: eix uebersetzt seine Ausgabe,

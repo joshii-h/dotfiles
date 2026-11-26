@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#
+# sysup-sushi-nautilus — hält Sushi (Leertasten-Vorschau) passend zu Nautilus.
+#
+#   sysup-sushi-nautilus pin     # Maske setzen, vor "emerge @world"
+#   sysup-sushi-nautilus check   # installierte Schnittstellen vergleichen
+#
+# Hintergrund: Nautilus ruft die Vorschau über D-Bus auf
+# (org.gnome.NautilusPreviewer2.ShowFile). Sushi 50 hat dort ein viertes
+# Argument (activationToken) bekommen; Nautilus 49 schickt nur drei, Sushi
+# lehnt den Aufruf ab und die Leertaste tut ohne jede Meldung nichts. Gentoo
+# hat Sushi 50 vor Nautilus 50 stabilisiert, und das Nautilus-Ebuild verlangt
+# nur ">=sushi-0.1.9" - Portage merkt davon also nichts.
+#
+# pin:   Sushi darf nie eine neuere Hauptversion haben als das Nautilus, das
+#        @world installieren würde -> Maske ">=gnome-extra/sushi-<N+1>".
+#        Gibt es im Tree keine so neue Sushi-Version, verschwindet die Maske
+#        wieder (sonst meldet eix-test-obsolete sie als Leiche).
+# check: Die Hauptversion ist nur eine Faustregel. Deshalb nach dem Update die
+#        ShowFile-Signatur aus Sushis Schnittstellenbeschreibung lesen und
+#        prüfen, ob Nautilus genau diese Signatur verwendet.
+#
+# Meldungen beginnen mit " * IMPORTANT:", damit sie in der sysup-Zusammenfassung
+# landen. Der Exit-Code ist immer 0: die Update-Kette soll daran nie scheitern.
+#
+set -uo pipefail
+
+MASK=/etc/portage/package.mask/sushi-nautilus
+NAUTILUS=gnome-base/nautilus
+SUSHI=gnome-extra/sushi
+RES=/usr/share/sushi/org.gnome.NautilusPreviewer.data.gresource
+XML=/org/gnome/NautilusPreviewer/org.gnome.NautilusPreviewer2.xml
+
+note() { printf ' * IMPORTANT: %s\n' "$*"; }
+
+installed() { portageq has_version / "$1" 2>/dev/null; }
+
+pin() {
+  local best major want
+  if ! installed "$NAUTILUS" || ! installed "$SUSHI"; then
+    [[ -e $MASK ]] && sudo rm -f "$MASK" && note "Sushi-Maske entfernt (Nautilus oder Sushi nicht mehr installiert)"
+    return 0
+  fi
+  best=$(portageq best_visible / "$NAUTILUS" 2>/dev/null)
+  major=${best#"$NAUTILUS"-}
+  major=${major%%[.-]*}
+  [[ $major =~ ^[0-9]+$ ]] || { note "Sushi-Maske unverändert: Nautilus-Version nicht ermittelbar (${best:-leer})"; return 0; }
+
+  if [[ -n $(portageq pquery --no-filters ">=$SUSHI-$((major + 1))" 2>/dev/null) ]]; then
+    want="# Von sysup-sushi-nautilus erzeugt - nicht von Hand ändern.
+# Sushi darf nicht neuer sein als Nautilus $major (Vorschau-Schnittstelle).
+>=$SUSHI-$((major + 1))"
+    if [[ ! -e $MASK || $(<"$MASK") != "$want" ]]; then
+      printf '%s\n' "$want" | sudo tee "$MASK" >/dev/null \
+        && note "Sushi an Nautilus $major gebunden (Maske >=$SUSHI-$((major + 1)))"
+    fi
+  elif [[ -e $MASK ]]; then
+    sudo rm -f "$MASK" && note "Sushi-Maske entfernt (Nautilus $major passt zur neuesten Sushi-Version)"
+  fi
+  return 0
+}
+
+check() {
+  local bin sig
+  installed "$NAUTILUS" && installed "$SUSHI" || return 0
+  bin=$(command -v nautilus) || return 0
+  [[ -r $RES ]] || return 0
+  # Typen der Eingabe-Argumente von ShowFile, z.B. "(ssbs)"
+  sig=$(gresource extract "$RES" "$XML" 2>/dev/null | awk '
+    /<method name="ShowFile"/ { m = 1; next }
+    m && /<\/method>/         { exit }
+    m && /direction="in"/ && match($0, /type="[^"]+"/) { s = s substr($0, RSTART + 6, RLENGTH - 7) }
+    END { if (s != "") print "(" s ")" }')
+  [[ -n $sig ]] || { note "Sushi/Nautilus: ShowFile-Signatur nicht lesbar - Leertasten-Vorschau von Hand prüfen"; return 0; }
+  grep -a -q -F -- "$sig" "$bin" \
+    || note "Sushi passt nicht zu Nautilus (Sushi erwartet ShowFile$sig) - Leertasten-Vorschau funktioniert nicht"
+  return 0
+}
+
+case ${1:-} in
+  pin)   pin ;;
+  check) check ;;
+  *)     echo "Aufruf: ${0##*/} pin|check" >&2; exit 2 ;;
+esac
+exit 0
